@@ -1,6 +1,7 @@
 <img src="./public/logo.png" width="150px" align="right" />
 
-> [!WARNING] > **Qipi** is in the development stage. It is not ready for any use at this time. ⏰
+> [!WARNING] 
+> **Qipi** is in the development stage. It is not ready for any use at this time. ⏰
 
 # Qipi - Package Manager
 
