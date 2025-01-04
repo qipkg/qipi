@@ -1,4 +1,5 @@
 mod response;
+pub use response::NpmPackage;
 
 use reqwest::{header, Client, ClientBuilder};
 

@@ -1,3 +1,4 @@
+use client::{create_client, NpmPackage};
 use futures::future::join_all;
 
 use crate::parser::Package;
@@ -19,7 +20,7 @@ pub fn list_command() {
 }
 
 pub async fn add_command(packages: Vec<String>, _dev: bool, _peer: bool, _optional: bool) {
-    let client = client::create_client();
+    let client = create_client();
 
     let packages_urls: Vec<String> = packages
         .iter()
@@ -54,7 +55,11 @@ pub async fn add_command(packages: Vec<String>, _dev: bool, _peer: bool, _option
     let responses = join_all(requests).await;
     for response in responses {
         match response {
-            Ok(res) => println!("Response: {}", res.status()),
+            Ok(res) => {
+                let package: NpmPackage = res.json().await.unwrap();
+
+                println!("Package: {}", package.name);
+            },
             Err(err) => eprintln!("Error: {}", err),
         }
     }
