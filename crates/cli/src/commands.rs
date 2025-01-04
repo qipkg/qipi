@@ -18,6 +18,7 @@ pub fn list_command() {
 
 pub fn add_command(package: String, _dev: bool, _peer: bool, _optional: bool) {
     let package = Package::parse(&package);
+    let client = client::create_client();
 
     match package {
         Ok(package) => {
