@@ -1,7 +1,14 @@
+mod parser;
+
 use clap::{Parser, Subcommand};
+use parser::Package;
 
 #[derive(Parser)]
-#[clap(name = "qipi", version = "0.1.0", author = "Nehuén <github.com/nehu3n>")]
+#[clap(
+    name = "qipi",
+    version = "0.1.0",
+    author = "Nehuén <github.com/nehu3n>"
+)]
 struct Args {
     #[clap(short, long)]
     verbose: bool,
@@ -66,9 +73,36 @@ pub fn init() {
         Some(Commands::Update) => todo!("Update dependencies"),
         Some(Commands::Run { script: _ }) => todo!("Run a script"),
         Some(Commands::List) => todo!("List dependencies"),
-        Some(Commands::Add { package: _ , dev: _, peer: _, optional: _ }) => todo!("Add a dependency"),
-        Some(Commands::Remove { package: _ }) => todo!("Remove a dependency"),
+        Some(Commands::Add {
+            package,
+            dev: _,
+            peer: _,
+            optional: _,
+        }) => {
+            let package = Package::parse(&package);
+
+            match package {
+                Ok(package) => {
+                    println!("{:?}", package);
+                }
+                Err(e) => {
+                    println!("{}", e);
+                }
+            }
+        }
+        Some(Commands::Remove { package }) => {
+            let package = Package::parse(&package);
+
+            match package {
+                Ok(package) => {
+                    println!("{:?}", package);
+                }
+                Err(e) => {
+                    println!("{}", e);
+                }
+            }
+        }
         Some(Commands::Init { name: _ }) => todo!("Create a new project"),
-        None => {},
+        None => {}
     }
 }
