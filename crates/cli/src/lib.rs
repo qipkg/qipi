@@ -1,7 +1,7 @@
+mod commands;
 mod parser;
 
 use clap::{Parser, Subcommand};
-use parser::Package;
 
 #[derive(Parser)]
 #[clap(
@@ -69,40 +69,18 @@ pub fn init() {
     let args = Args::parse();
 
     match args.command {
-        Some(Commands::Install) => todo!("Install dependencies"),
-        Some(Commands::Update) => todo!("Update dependencies"),
-        Some(Commands::Run { script: _ }) => todo!("Run a script"),
-        Some(Commands::List) => todo!("List dependencies"),
+        Some(Commands::Install) => commands::install_command(),
+        Some(Commands::Update) => commands::update_command(),
+        Some(Commands::Run { script }) => commands::run_command(script),
+        Some(Commands::List) => commands::list_command(),
         Some(Commands::Add {
             package,
-            dev: _,
-            peer: _,
-            optional: _,
-        }) => {
-            let package = Package::parse(&package);
-
-            match package {
-                Ok(package) => {
-                    println!("{:?}", package);
-                }
-                Err(e) => {
-                    println!("{}", e);
-                }
-            }
-        }
-        Some(Commands::Remove { package }) => {
-            let package = Package::parse(&package);
-
-            match package {
-                Ok(package) => {
-                    println!("{:?}", package);
-                }
-                Err(e) => {
-                    println!("{}", e);
-                }
-            }
-        }
-        Some(Commands::Init { name: _ }) => todo!("Create a new project"),
+            dev,
+            peer,
+            optional,
+        }) => commands::add_command(package, dev, peer, optional),
+        Some(Commands::Remove { package }) => commands::remove_command(package),
+        Some(Commands::Init { name }) => commands::init_command(name),
         None => {}
     }
 }
