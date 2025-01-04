@@ -1,3 +1,4 @@
-fn main() {
-    cli::init();
+#[tokio::main]
+async fn main() {
+    cli::init().await;
 }

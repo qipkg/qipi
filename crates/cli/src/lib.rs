@@ -37,7 +37,7 @@ enum Commands {
     /// Add a dependency
     Add {
         /// Dependency to add
-        package: String,
+        packages: Vec<String>,
 
         /// It's a dev dependency
         #[clap(short, long)]
@@ -65,7 +65,7 @@ enum Commands {
     },
 }
 
-pub fn init() {
+pub async fn init() {
     let args = Args::parse();
 
     match args.command {
@@ -74,11 +74,11 @@ pub fn init() {
         Some(Commands::Run { script }) => commands::run_command(script),
         Some(Commands::List) => commands::list_command(),
         Some(Commands::Add {
-            package,
+            packages,
             dev,
             peer,
             optional,
-        }) => commands::add_command(package, dev, peer, optional),
+        }) => commands::add_command(packages, dev, peer, optional).await,
         Some(Commands::Remove { package }) => commands::remove_command(package),
         Some(Commands::Init { name }) => commands::init_command(name),
         None => {}

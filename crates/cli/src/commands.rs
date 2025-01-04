@@ -1,3 +1,5 @@
+use futures::future::join_all;
+
 use crate::parser::Package;
 
 pub fn install_command() {
@@ -16,16 +18,44 @@ pub fn list_command() {
     todo!("List dependencies");
 }
 
-pub fn add_command(package: String, _dev: bool, _peer: bool, _optional: bool) {
-    let package = Package::parse(&package);
+pub async fn add_command(packages: Vec<String>, _dev: bool, _peer: bool, _optional: bool) {
     let client = client::create_client();
 
-    match package {
-        Ok(package) => {
-            println!("{:?}", package);
-        }
-        Err(e) => {
-            println!("{}", e);
+    let packages_urls: Vec<String> = packages
+        .iter()
+        .filter_map(|pkg| match Package::parse(pkg) {
+            Ok(package) => {
+                let base_url = if let Some(author) = package.author {
+                    format!("https://registry.npmjs.org/@{}/{}", author, package.name)
+                } else {
+                    format!("https://registry.npmjs.org/{}", package.name)
+                };
+
+                let final_url = if let Some(version) = package.version {
+                    format!("{}/{}", base_url, version.complete)
+                } else {
+                    format!("{}/{}", base_url, "latest")
+                };
+
+                Some(final_url)
+            }
+            Err(e) => {
+                println!("{}", e);
+                None
+            }
+        })
+        .collect();
+
+    let requests = packages_urls.into_iter().map(|url| {
+        let client = &client;
+        async move { client.get(url).send().await }
+    });
+
+    let responses = join_all(requests).await;
+    for response in responses {
+        match response {
+            Ok(res) => println!("Response: {}", res.status()),
+            Err(err) => eprintln!("Error: {}", err),
         }
     }
 }

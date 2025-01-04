@@ -7,3 +7,4 @@ edition = "2021"
 clap = { version = "4.5.23", features = ["derive"] }
 regex = "1.11.1"
 client = { path = "../client" }
+futures = "0.3.31"

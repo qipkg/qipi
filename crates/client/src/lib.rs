@@ -9,7 +9,6 @@ pub fn create_client() -> Client {
             headers.insert(header::USER_AGENT, "Qipi/1.0".parse().unwrap());
             headers
         })
-        .http2_prior_knowledge()
         .build();
 
     client.unwrap()
