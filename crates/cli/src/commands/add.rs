@@ -36,15 +36,14 @@ pub async fn add_command(packages: Vec<String>, _dev: bool, _peer: bool, _option
         async move { client.get(url).send().await }
     });
 
-    let responses = join_all(requests).await;
-    for response in responses {
-        match response {
-            Ok(res) => {
-                let package: NpmPackage = res.json().await.unwrap();
+    let responses: Vec<NpmPackage> = join_all(
+        requests
+            .into_iter()
+            .map(|res| async { res.await.unwrap().json::<NpmPackage>().await.unwrap() }),
+    )
+    .await;
 
-                println!("Package: {}", package.name);
-            }
-            Err(err) => eprintln!("Error: {}", err),
-        }
+    for package in responses {
+        println!("Package: {}", package.name);
     }
 }
