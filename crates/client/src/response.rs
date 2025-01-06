@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug, Clone)]
 pub struct NpmPackage {
     pub name: String,
     pub version: String,
@@ -12,7 +12,7 @@ pub struct NpmPackage {
     pub optional_dependencies: Option<HashMap<String, String>>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug, Clone)]
 pub struct Dist {
     pub tarball: String,
     pub integrity: String,

@@ -1,5 +1,6 @@
 use client::{create_client, NpmPackage};
 use futures::future::join_all;
+use resolver::DependencyResolver;
 
 use crate::parser::Package;
 
@@ -43,7 +44,18 @@ pub async fn add_command(packages: Vec<String>, _dev: bool, _peer: bool, _option
     )
     .await;
 
-    for package in responses {
-        println!("Package: {}", package.name);
+    let mut resolver = DependencyResolver::new(client, responses);
+    match resolver.resolve_dependencies().await {
+        Ok(graph) => {
+            for resolved_package in graph.iter_installation_order() {
+                println!(
+                    "resolved {}@{}",
+                    resolved_package.package.name, resolved_package.package.version
+                );
+            }
+        }
+        Err(e) => {
+            println!("Error resolving dependencies: {:?}", e);
+        }
     }
 }
