@@ -141,7 +141,7 @@ impl DependencyResolver {
         let req = VersionReq::parse(version_req)
             .map_err(|_| ResolverError::InvalidVersion(version_req.to_string()))?;
 
-        let matching_packages: Vec<_> = self
+        let matching_packages: Vec<String> = self
             .package_map
             .iter()
             .filter(|(_, p)| p.name == name)
@@ -158,14 +158,30 @@ impl DependencyResolver {
             .max_by_key(|id| Version::parse(&self.package_map[id.as_str()].version).unwrap())
         {
             self.resolve_package(id, false).await?;
-            Ok(id.to_string())
-        } else {
-            let package = self.download_package(name, version_req).await?;
-            let package_id = format!("{}@{}", package.name, package.version);
-            self.package_map.insert(package_id.clone(), package);
-            self.resolve_package(&package_id, false).await?;
-            Ok(package_id)
+            return Ok(id.to_string());
         }
+
+        let package = self.download_package(name, version_req).await?;
+
+        let package_version = Version::parse(&package.version)
+            .map_err(|_| ResolverError::InvalidVersion(package.version.clone()))?;
+
+        if let Some((existing_id, existing_pkg)) = self
+            .package_map
+            .iter()
+            .filter(|(_, p)| p.name == name)
+            .max_by_key(|(_, p)| Version::parse(&p.version).unwrap())
+        {
+            let existing_version = Version::parse(&existing_pkg.version).unwrap();
+            if existing_version >= package_version && req.matches(&existing_version) {
+                return Ok(existing_id.clone());
+            }
+        }
+
+        let package_id = format!("{}@{}", package.name, package.version);
+        self.package_map.insert(package_id.clone(), package);
+        self.resolve_package(&package_id, false).await?;
+        Ok(package_id)
     }
 
     async fn download_package(
@@ -247,6 +263,23 @@ impl DependencyResolver {
 impl DependencyGraph {
     pub fn iter_installation_order(&self) -> InstallationOrderIterator {
         InstallationOrderIterator::new(self)
+    }
+    pub fn get_dependency_chain(&self, package_id: &str) -> Vec<String> {
+        let mut chain = vec![];
+        let mut current = package_id;
+
+        while let Some(pkg) = self.nodes.get(current) {
+            chain.push(current.to_string());
+ 
+            if let Some(dependent) = pkg.dependent_packages.iter().next() {
+                current = dependent;
+            } else {
+                break;
+            }
+        }
+
+        chain.reverse();
+        chain
     }
 }
 

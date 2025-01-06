@@ -47,11 +47,25 @@ pub async fn add_command(packages: Vec<String>, _dev: bool, _peer: bool, _option
     let mut resolver = DependencyResolver::new(client, responses);
     match resolver.resolve_dependencies().await {
         Ok(graph) => {
-            for resolved_package in graph.iter_installation_order() {
-                println!(
-                    "resolved {}@{}",
-                    resolved_package.package.name, resolved_package.package.version
-                );
+            println!("\nResolving dependencies...\n");
+            for package in graph.iter_installation_order() {
+                let chain = graph.get_dependency_chain(&package.id);
+                let indent = "  ".repeat(chain.len() - 1);
+
+                if chain.len() > 1 {
+                    println!(
+                        "{}{}@{} (required by {})",
+                        indent,
+                        package.package.name,
+                        package.package.version,
+                        chain.first().unwrap().split('@').next().unwrap()
+                    );
+                } else {
+                    println!(
+                        "{}{}@{}",
+                        indent, package.package.name, package.package.version
+                    );
+                }
             }
         }
         Err(e) => {
