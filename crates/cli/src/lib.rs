@@ -1,6 +1,8 @@
 mod cmds;
+mod utils;
 
 use clap::{Parser, Subcommand};
+use utils::parse_package;
 
 #[derive(Parser)]
 struct Args {
@@ -27,5 +29,17 @@ enum Commands {
 }
 
 pub async fn init() {
-    let _args = Args::parse();
+    let args = Args::parse();
+
+    match args.cmds {
+        Commands::Add { global, packages } => {
+            for package in packages {
+                let result = parse_package(package).unwrap();
+                println!("{:?}", result);
+            }
+        },
+        Commands::Remove { global, packages } => {}
+        Commands::Install {  } => {}
+        Commands::Uninstall {  } => {}
+    }
 }
