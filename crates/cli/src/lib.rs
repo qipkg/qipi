@@ -2,7 +2,7 @@ mod cmds;
 mod utils;
 
 use clap::{Parser, Subcommand};
-use utils::parse_package;
+use utils::{parse_package, parse_version};
 
 #[derive(Parser)]
 struct Args {
@@ -36,6 +36,9 @@ pub async fn init() {
             for package in packages {
                 let result = parse_package(package).unwrap();
                 println!("{:?}", result);
+
+                let result_version = parse_version(&result.version.unwrap()).unwrap();
+                println!("{:?}", result_version);
             }
         },
         Commands::Remove { global, packages } => {}
