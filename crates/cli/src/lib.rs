@@ -2,7 +2,7 @@ mod cmds;
 mod parsers;
 
 use clap::{Parser, Subcommand};
-use parsers::{parse_package, Package};
+use cmds::{AddCommand, Command};
 
 #[derive(Parser)]
 struct Args {
@@ -33,17 +33,9 @@ pub async fn init() {
 
     match args.cmds {
         Commands::Add { global, packages } => {
-            let parsed_packages: Result<Vec<Package>, ()> = packages
-                .iter()
-                .map(|package| parse_package(package.to_string()).map_err(|_| ()))
-                .collect();
-
-            match parsed_packages {
-                Ok(packages) => {}
-                Err(_) => {}
-            }
+            let cmd = AddCommand::new(global, packages);
+            cmd.execute().await;
         }
-
         Commands::Remove { global, packages } => {}
         Commands::Install {} => {}
         Commands::Uninstall {} => {}
