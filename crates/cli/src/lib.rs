@@ -41,3 +41,5 @@ pub async fn init() {
         Commands::Uninstall {} => {}
     }
 }
+
+pub use parsers::Package;
