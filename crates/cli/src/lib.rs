@@ -1,8 +1,8 @@
 mod cmds;
-mod utils;
+mod parsers;
 
 use clap::{Parser, Subcommand};
-use utils::{parse_package, Package};
+use parsers::{parse_package, Package};
 
 #[derive(Parser)]
 struct Args {
