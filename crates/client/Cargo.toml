@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 once_cell = "1.21.3"
 reqwest = "0.12.15"
-cli = { path = "../cli" }
+shared = { path = "../shared" }

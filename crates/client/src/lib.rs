@@ -1,6 +1,6 @@
-use cli::Package;
 use once_cell::sync::Lazy;
 use reqwest::{header, Client, ClientBuilder};
+use shared::Package;
 use std::time::Duration;
 
 static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {

@@ -1,5 +1,10 @@
 use crate::cmds::Command;
-use crate::parsers::{parse_package, Package};
+use crate::parsers::parse_package;
+use client::fetch_package;
+use shared::Package;
+
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 
 pub struct AddCommand {
     pub global: bool,
@@ -21,10 +26,26 @@ impl Command for AddCommand {
             .collect();
 
         match parsed_packages {
-            Ok(packages) => {}
-            Err(_) => {}
+            Ok(packages) => {
+                let mut futures = FuturesUnordered::new();
+
+                for package in &packages {
+                    futures.push(Box::pin(fetch_package(package)));
+                }
+
+                while let Some(result) = futures.next().await {
+                    match result {
+                        Ok(data) => println!("fetched: {}", data),
+                        Err(err) => eprintln!("error fetching package: {}", err),
+                    }
+                }
+            }
+            Err(_) => {
+                eprintln!("error parsing packages");
+            }
         }
     }
+
     async fn resolve_dependencies(&self) {}
     async fn update_manifests(&self) {}
     async fn scripts(&self) {}
