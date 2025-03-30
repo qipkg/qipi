@@ -6,7 +6,6 @@ use std::time::Duration;
 static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
     ClientBuilder::new()
         .tcp_nodelay(true)
-        .http2_prior_knowledge()
         .pool_max_idle_per_host(10)
         .timeout(Duration::from_secs(10))
         .connect_timeout(Duration::from_secs(3))
