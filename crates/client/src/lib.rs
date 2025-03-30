@@ -21,11 +21,26 @@ static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
 });
 
 pub async fn fetch_package(package: &Package) -> Result<String, reqwest::Error> {
-    // todo: build name and version correctly
-    let package_name = &package.name;
-    let package_version = "latest";
-
-    let url = format!("https://registry.npmjs.org/{package_name}/{package_version}/");
+    let url = build_registry_url(package);
     let response = HTTP_CLIENT.get(&url).send().await?.text().await?;
     Ok(response)
+}
+
+fn build_registry_url(package: &Package) -> String {
+    let scope = package
+        .author
+        .as_ref()
+        .map(|a| format!("@{}/", a))
+        .unwrap_or_default();
+
+    let version = package
+        .version
+        .as_ref()
+        .map(|v| v.complete.clone())
+        .unwrap_or_else(|| "latest".to_string());
+
+    format!(
+        "https://registry.npmjs.org/{}{}/{}",
+        scope, package.name, version
+    )
 }
