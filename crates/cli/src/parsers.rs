@@ -40,6 +40,7 @@ pub struct Semver {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
+    pub complete: String,
 }
 
 impl FromStr for Semver {
@@ -61,6 +62,7 @@ impl FromStr for Semver {
                 major,
                 minor,
                 patch,
+                complete: s.to_string(),
             })
         } else {
             Err(())
