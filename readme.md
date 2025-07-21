@@ -1,47 +1,82 @@
-<img src="./.github/logo.png" width="150px" align="right" />
+<img src="./.github/logo.png" width="140" align="right" />
+
+# Qipi 🦉
 
 > [!WARNING] 
 > **Qipi** is in the development stage. It is not ready for any use at this time. ⏰
 
-# Qipi - Package Manager
+---
 
-🦉 **Qipi** is an extremely fast and disk-efficient package manager for NodeJS written in Rust.
+**Qipi** is a next-gen package manager for Node.js, built in Rust, designed for _extremely speed_, _cleanliness_, and _zero bloat_.
 
-## ✨ Features
+## 🚀 Features
 
-- **Extremely fast:** Qipi is the fastest package manager: **20x the speed of PNPM**. See the [benchmarks](./benches).
-- **Disk-efficient:** It uses a centralized cache architecture and symlinks to avoid duplicates. Install once for everything.
-- **Secure:** Checks cryptographic signatures and prevents automatic post-install scripts.
-- **Deterministic:** Maintain consistency between projects with a lockfile (`package.lock`)
+- 📁 **No `node_modules`** — no clutter, no recursive resolution, no legacy tree.
+- ⚡ **Extremely-fast installs** — projects install in under **1 second**.
+- 🔁 **Single global store** — one install per version, forever.
+- 📦 **Clean repos** — only `package.json` and `package.lock`. Nothing else.
+- 🧠 **O(1) resolver** — powered by memory-mapped binary lockfiles & perfect hashing.
+- 🔌 **Full compatibility** — seamless with all Node.js tooling. FUSE-based virtual `node_modules` when needed.
+- 🧩 **Built-in workspaces** — simple, plug-and-play.
 
-## 🚀 Installation
+> [[Read the introductory and technical post]](https://nh3.pages.dev/blog/introducing-qipi)
 
-Install **Qipi** with the following command:
+---
+
+## 📦 Quick Usage
+
+```bash
+# Create and enter a project
+qp new app
+cd app
+
+# Add dependencies (done in <100ms)
+qp add lodash
+
+# Start a shell with Qipi's resolver
+qp shell
+node .
+````
+
+_Need legacy support?_
+
+```bash
+qp mount   # creates a virtual node_modules (FUSE)
+qp umount  # removes it
+```
+
+---
+
+## 🚀 Install
 
 ```bash
 npm install -g qipi
 ```
 
-## 📈 Benchmarks
+You can find more installation methods [here](https://qipi.pages.dev/docs/install).
 
-You can see the different benchmarks [here](./benches).
+---
 
 ## 📚 Documentation
 
-For detailed documentation, visit the [Qipi website](https://qipi.pages.dev).
+All **Qipi** documentation is located on the [official website](https://qipi.pages.dev). You'll find information about usage, architecture, FAQs, the community, and much more!
 
-## 🤝 Contributing
+---
 
-Contributions are welcome! Please see our [contributing.md](./contributing.md) for guidelines on how to contribute.
+## ❤️ Contribute
+
+**Any contribution is welcome!** You can contribute by reporting bugs, recommending features, contributing code, sharing on social media, and many other ways. Read the [contributing guidelines](./contributing.md) for more information.
+
+---
 
 ## 📄 License
 
-This project is licensed under the [MIT License](./license).
+Licensed under the [MIT License](./license.md).
 
-<hr />
+---
 
 <div align="right">
 
-##### Thanks to [Camilo Zuluaga](https://github.com/camilo-zuluaga) for creating the logo. ❤
+#### Logo by [Camilo Zuluaga](https://github.com/camilo-zuluaga) ❤
 
 </div>
