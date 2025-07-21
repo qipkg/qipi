@@ -7,6 +7,7 @@ use commands::*;
 #[derive(Parser)]
 #[command(name = "qp")]
 #[command(about = "Extremely fast, disk-efficient, node_modules-free, instant, and secure package manager for Node.js — written in Rust.", long_about = None)]
+#[command(arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
