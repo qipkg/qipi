@@ -32,11 +32,11 @@ For detailed documentation, visit the [Qipi website](https://qipi.pages.dev).
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see our [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on how to contribute.
+Contributions are welcome! Please see our [contributing.md](./contributing.md) for guidelines on how to contribute.
 
 ## 📄 License
 
-This project is licensed under the [MIT License](./LICENSE).
+This project is licensed under the [MIT License](./license).
 
 <hr />
 
