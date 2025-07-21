@@ -9,5 +9,3 @@ edition = "2021"
 members = ["crates/*"]
 
 [dependencies]
-cli = { path = "crates/cli" }
-tokio = { version = "1.42.0", features = ["full"] }
