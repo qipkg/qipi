@@ -1,3 +1,6 @@
+mod commands;
+mod macros;
+
 use clap::Parser;
 
 #[derive(Parser)]
