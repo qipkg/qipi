@@ -1,14 +1,13 @@
-[package]
-name = "qipi"
-description = "🦉 Extremely fast, disk-efficient, node_modules-free, instant, and secure package manager for Node.js — written in Rust."
-authors = ["Nehuén <https://github.com/nehu3n>"]
-version = "0.1.0"
-edition = "2024"
-repository = "https://github.com/qipkg/qipi"
-readme = "readme.md"
-license = "MIT"
-
 [workspace]
-members = ["crates/*"]
+members = []
+resolver = "3"
 
-[dependencies]
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+authors = ["Nehuén <https://github.com/nehu3n>"]
+license = "MIT"
+repository = "https://github.com/qipkg/qipi"
+homepage = "https://qipi.pages.dev"
+
+[workspace.dependencies]
