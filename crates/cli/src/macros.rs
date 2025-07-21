@@ -2,9 +2,9 @@
 macro_rules! register_commands {
     ($($name:ident),*) => {
         $(
-            pub mod $name;
+            pub(crate) mod $name;
             paste::paste! {
-                pub use $name::[<$name:camel Command>];
+                pub(crate) use $name::[<$name:camel Command>];
             }
         )*
     }
