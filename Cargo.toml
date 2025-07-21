@@ -1,9 +1,12 @@
 [package]
 name = "qipi"
-description = "🦉 The blazing-fast, disk-efficient package manager."
+description = "🦉 Extremely fast, disk-efficient, node_modules-free, instant, and secure package manager for Node.js — written in Rust."
 authors = ["Nehuén <https://github.com/nehu3n>"]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+repository = "https://github.com/qipkg/qipi"
+readme = "readme.md"
+license = "MIT"
 
 [workspace]
 members = ["crates/*"]
