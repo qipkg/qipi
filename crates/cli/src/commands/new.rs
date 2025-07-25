@@ -5,6 +5,7 @@ use std::{
     fs::{create_dir, write},
     path::Path,
 };
+use utils::{error, info, logger::Logger};
 
 #[derive(Debug, Args)]
 pub(crate) struct NewCommand {
@@ -13,14 +14,21 @@ pub(crate) struct NewCommand {
 
 impl Command for NewCommand {
     fn run(&self) -> Result<(), ()> {
+        let logger = Logger::new();
+
         let path = Path::new(&self.path);
 
         if path.exists() {
-            eprintln!("directory '{}' already exists", self.path);
+            error!(logger, "Directory '{}' already exists", self.path);
             return Err(());
         }
 
-        create_dir(path).expect("error creating folder in 'new' command");
+        if let Err(e) = create_dir(path) {
+            error!(logger, "Error creating folder in 'new' command: {e}");
+            return Err(());
+        }
+
+        info!(logger, "The project folder was created");
 
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unnamed");
 
@@ -33,11 +41,17 @@ impl Command for NewCommand {
             name = name
         );
 
-        write(path.join("package.json"), content)
-            .expect("error writing package.json in 'new' command");
+        if let Err(e) = write(path.join("package.json"), content) {
+            error!(logger, "Error writing package.json in 'new' command: {e}");
+        } else {
+            info!(logger, "The package.json file was written")
+        };
 
-        write(path.join("package.lock"), b"")
-            .expect("error creating package.lock in 'new' command");
+        if let Err(e) = write(path.join("package.lock"), b"") {
+            error!(logger, "Error creating package.lock in 'new' command: {e}");
+        } else {
+            info!(logger, "The package.lock file was written");
+        }
 
         Ok(())
     }
