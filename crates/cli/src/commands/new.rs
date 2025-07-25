@@ -3,7 +3,7 @@ use clap::Args;
 
 use std::{
     fs::{create_dir, write},
-    path::MAIN_SEPARATOR_STR,
+    path::Path,
 };
 
 #[derive(Debug, Args)]
@@ -13,11 +13,16 @@ pub(crate) struct NewCommand {
 
 impl Command for NewCommand {
     fn run(&self) -> Result<(), ()> {
-        create_dir(&self.path).expect("error creating folder in 'new' command");
+        let path = Path::new(&self.path);
 
-        let package_json_path = format!("{0}{MAIN_SEPARATOR_STR}package.json", self.path);
+        if path.exists() {
+            eprintln!("directory '{}' already exists", self.path);
+            return Err(());
+        }
 
-        let name = self.path.split(MAIN_SEPARATOR_STR).last().unwrap_or("unnamed");
+        create_dir(path).expect("error creating folder in 'new' command");
+
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unnamed");
 
         let content = format!(
             r###"{{
@@ -28,10 +33,11 @@ impl Command for NewCommand {
             name = name
         );
 
-        write(package_json_path, content).expect("error writing package.json in 'new' command");
+        write(path.join("package.json"), content)
+            .expect("error writing package.json in 'new' command");
 
-        let package_lock_path = format!("{0}{MAIN_SEPARATOR_STR}package.lock", self.path);
-        write(package_lock_path, b"").expect("error creating package.lock in 'new' command");
+        write(path.join("package.lock"), b"")
+            .expect("error creating package.lock in 'new' command");
 
         Ok(())
     }
