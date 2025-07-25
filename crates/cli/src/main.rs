@@ -52,8 +52,7 @@ fn main() {
     let cli = Cli::parse();
 
     if let Some(cmd) = cli.command {
-        if let Err(err) = cmd.run() {
-            eprintln!("error: {err:?}");
+        if cmd.run().is_err() {
             std::process::exit(1);
         }
     }
