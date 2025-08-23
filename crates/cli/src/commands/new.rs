@@ -30,7 +30,6 @@ impl Command for NewCommand {
   "version": "1.0.0",
   "dependencies": {{}}
 }}"###,
-            name = name
         );
 
         write(path.join("package.json"), content)

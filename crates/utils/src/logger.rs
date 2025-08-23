@@ -18,12 +18,12 @@ fn timestamp() -> String {
 fn log_line(symbol_colored: impl Display, msg_colored: impl Display, time: bool, stderr: bool) {
     let timestamp_str = if time { format!("{} ", timestamp().dimmed()) } else { String::new() };
 
-    let line = format!("{}{} {}", timestamp_str, symbol_colored, msg_colored);
+    let line = format!("{timestamp_str}{symbol_colored} {msg_colored}");
 
     if stderr {
-        eprintln!("{}", line);
+        eprintln!("{line}");
     } else {
-        println!("{}", line);
+        println!("{line}");
     }
 }
 

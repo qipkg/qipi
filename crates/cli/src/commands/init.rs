@@ -33,7 +33,6 @@ impl Command for InitCommand {
   "version": "1.0.0",
   "dependencies": {{}}
 }}"###,
-            name = name
         );
 
         let package_json_path = path.join("package.json");
