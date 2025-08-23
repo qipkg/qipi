@@ -2,6 +2,7 @@ use crate::Command;
 use clap::Args;
 
 use std::{env::current_dir, fs::write, path::Path};
+use utils::logger::*;
 
 #[derive(Debug, Args)]
 pub(crate) struct InitCommand {
@@ -17,6 +18,8 @@ impl Command for InitCommand {
         if self.workspace && !workspace_json_path.exists() {
             write(workspace_json_path, b"{}")
                 .expect("error writing workspace.json in 'init' command");
+
+            info("workspace.json created", false);
         }
 
         let name = current_dir()
@@ -37,12 +40,18 @@ impl Command for InitCommand {
         if !package_json_path.exists() {
             write(package_json_path, content)
                 .expect("error writing package.json in 'init' command");
+
+            info("package.json created", false);
         }
 
         let package_lock_path = path.join("package.lock");
         if !package_lock_path.exists() {
             write(package_lock_path, b"").expect("error creating package.lock in 'init' command");
+
+            info("package.lock created", false);
         }
+
+        success("Project initialized", false);
 
         Ok(())
     }
