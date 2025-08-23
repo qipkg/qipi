@@ -5,6 +5,7 @@ use std::{
     fs::{create_dir, write},
     path::Path,
 };
+use utils::logger::*;
 
 #[derive(Debug, Args)]
 pub(crate) struct NewCommand {
@@ -16,7 +17,7 @@ impl Command for NewCommand {
         let path = Path::new(&self.path);
 
         if path.exists() {
-            eprintln!("directory '{}' already exists", self.path);
+            error(format!("Directory '{0}' already exists", self.path), false);
             return Err(());
         }
 
@@ -35,8 +36,14 @@ impl Command for NewCommand {
         write(path.join("package.json"), content)
             .expect("error writing package.json in 'new' command");
 
+        info("package.json created", false);
+
         write(path.join("package.lock"), b"")
             .expect("error creating package.lock in 'new' command");
+
+        info("package.lock created", false);
+
+        success(format!("Project '{0}' created", self.path), false);
 
         Ok(())
     }
