@@ -1,0 +1,15 @@
+[package]
+name = "qipi"
+version = "0.0.0"
+edition = "2024"
+authors = ["Nehuén <https://github.com/nehu3n>"]
+license = "MIT"
+description = "Placeholder for Qipi — not yet available."
+repository = "https://github.com/qipkg/qipi"
+homepage = "https://qipi.pages.dev"
+
+[[bin]]
+name = "qp"
+path = "src/main.rs"
+
+[dependencies]
