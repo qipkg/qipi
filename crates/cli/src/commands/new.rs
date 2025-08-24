@@ -11,6 +11,9 @@ use utils::logger::*;
 pub(crate) struct NewCommand {
     path: String,
 
+    #[clap(short, long, default_value_t = false)]
+    workspace: bool,
+
     #[clap(short = 'a', long, default_value_t = false)]
     auto_shell: bool,
 }
@@ -25,6 +28,14 @@ impl Command for NewCommand {
         }
 
         create_dir(path).expect("error creating folder in 'new' command");
+
+        let workspace_json_path = path.join("workspace.json");
+        if self.workspace {
+            write(workspace_json_path, b"{}")
+                .expect("error writing workspace.json in 'new' command");
+
+            info("workspace.json created", false);
+        }
 
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unnamed");
 
