@@ -10,6 +10,9 @@ use utils::logger::*;
 #[derive(Debug, Args)]
 pub(crate) struct NewCommand {
     path: String,
+
+    #[clap(short = 'a', long, default_value_t = false)]
+    auto_shell: bool,
 }
 
 impl Command for NewCommand {
@@ -33,15 +36,31 @@ impl Command for NewCommand {
 }}"###,
         );
 
-        write(path.join("package.json"), content)
-            .expect("error writing package.json in 'new' command");
+        let package_json_path = path.join("package.json");
+        write(package_json_path, content).expect("error writing package.json in 'new' command");
 
         info("package.json created", false);
 
-        write(path.join("package.lock"), b"")
-            .expect("error creating package.lock in 'new' command");
+        let package_lock_path = path.join("package.lock");
+        write(package_lock_path, b"").expect("error creating package.lock in 'new' command");
 
         info("package.lock created", false);
+
+        let envrc_path = path.join(".envrc");
+        if self.auto_shell {
+            let content = r#"# Qipi shell auto-loader (avoid running 'qp shell' every time)
+# Install direnv (https://direnv.net) to use this feature
+# Run 'direnv allow' to enable automatic environment loading
+
+if command -v qp &> /dev/null; then
+    eval "$(qp shell --export)"
+fi
+"#;
+            write(envrc_path, content).expect("error creating .envrc in 'new' command");
+
+            info(".envrc created", false);
+            sub_info("Run 'direnv allow' to enable automatic Qipi shell loading", false);
+        }
 
         success(format!("Project '{0}' created", self.path), false);
 
