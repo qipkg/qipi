@@ -1,0 +1,55 @@
+{
+	"name": "qipi",
+	"version": "0.0.0",
+	"description": "🦉 Extremely fast, disk-efficient, node_modules-free, instant, and secure package manager for Node.js — written in Rust.",
+	"bin": {
+		"qp": "bin/qp"
+	},
+	"scripts": {
+		"postinstall": "node scripts/install.js"
+	},
+	"keywords": [
+		"package manager",
+		"package-manager",
+		"npm",
+		"yarn",
+		"pnpm",
+		"node",
+		"nodejs",
+		"efficient",
+		"fast",
+		"disk-efficient",
+		"secure",
+		"instant",
+		"rust",
+		"cli"
+	],
+	"author": "Nehuén <github.com/nehu3n>",
+	"license": "MIT",
+	"homepage": "https://qipi.pages.dev",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/qipkg/qipi.git"
+	},
+	"bugs": {
+		"url": "https://github.com/qipkg/qipi/issues"
+	},
+	"engines": {
+		"node": ">=12.0.0"
+	},
+	"os": [
+		"darwin",
+		"linux",
+		"win32"
+	],
+	"cpu": [
+		"x64",
+		"arm64"
+	],
+	"files": [
+		"bin/",
+		"scripts/install.js",
+		"license",
+		"readme.md"
+	]
+}
