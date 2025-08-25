@@ -5,13 +5,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::semver;
-use client::versions::RequestPackage;
+use client::{registry::PackageVersion, versions::RequestPackage};
 use utils::logger::*;
 
 #[derive(Debug, Clone)]
 pub struct DAGNode {
     pub package: String,
     pub dependencies: Vec<String>,
+    pub info: PackageVersion,
 }
 
 #[derive(Debug, Default)]
@@ -229,7 +230,7 @@ impl DAGBuilder {
             }
 
             let final_key = format!("{name}@{selected_version}");
-            let node = DAGNode { package: final_key.clone(), dependencies: dep_keys };
+            let node = DAGNode { package: final_key.clone(), dependencies: dep_keys, info: pkg_version, };
 
             {
                 let mut graph = self.graph.lock().await;
