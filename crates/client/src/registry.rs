@@ -2,6 +2,30 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum DeprecatedField {
+    Text(String),
+    Bool(bool),
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum BinField {
+    Map(HashMap<String, String>),
+    Str(String),
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum EnginesField {
+    Map(HashMap<String, String>),
+    Str(String),
+    Bool(bool),
+    Seq(Vec<serde_json::Value>),
+    None,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct RegistryPackage {
     pub name: String,
     pub versions: HashMap<String, PackageVersion>,
@@ -22,11 +46,11 @@ pub struct PackageVersion {
     pub optional_dependencies: Option<HashMap<String, String>>,
     pub dist: DistInfo,
     #[serde(default)]
-    pub engines: Option<HashMap<String, String>>,
+    pub engines: Option<EnginesField>,
     #[serde(default)]
-    pub bin: Option<HashMap<String, String>>,
+    pub bin: Option<BinField>,
     #[serde(default)]
-    pub deprecated: Option<String>,
+    pub deprecated: Option<DeprecatedField>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
