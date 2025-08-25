@@ -3,7 +3,7 @@ use flate2::read::GzDecoder;
 use tar::Archive;
 
 use std::{
-    fs::{File, create_dir_all, remove_file},
+    fs::{File, create_dir_all, read_dir, remove_dir_all, remove_file, rename},
     io::{BufReader, copy},
     path::PathBuf,
 };
@@ -57,6 +57,16 @@ impl Store {
         let tar = GzDecoder::new(BufReader::new(tar_gz));
         let mut archive = Archive::new(tar);
         archive.unpack(package_path).unwrap();
+
+        let inner = package_path.join("package");
+        if inner.exists() {
+            for entry in read_dir(&inner).unwrap() {
+                let entry = entry.unwrap();
+                let dest = package_path.join(entry.file_name());
+                rename(entry.path(), dest).unwrap();
+            }
+            remove_dir_all(inner).unwrap();
+        }
 
         remove_file(tarball_path).unwrap();
 
