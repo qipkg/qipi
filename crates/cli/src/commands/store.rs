@@ -4,6 +4,9 @@ use async_trait::async_trait;
 use clap::{ArgGroup, Args};
 
 use store::Store;
+use utils::logger::*;
+
+use std::fs::read_dir;
 
 #[derive(Debug, Args)]
 #[clap(group(
@@ -23,23 +26,94 @@ pub(crate) struct StoreCommand {
 impl Command for StoreCommand {
     async fn run(&self) -> Result<(), ()> {
         let store = Store::new();
+        let mut term = Term::default();
+        let mut theme = MinimalTheme::default();
 
         if self.clear {
-            // todo: before deleting, confirm with a prompt y/n
-            store.clear();
+            let mut p = Promptuity::new(&mut term, &mut theme);
+            p.begin().unwrap();
+            let confirmed = p
+                .prompt(
+                    Confirm::new("Are you sure you want to remove all packages?")
+                        .with_default(true),
+                )
+                .unwrap_or(false);
+            p.finish().unwrap();
+
+            if confirmed {
+                store.clear();
+            }
         }
 
         if !self.remove.is_empty() {
-            for package in &self.remove {
-                let req_package = parse_package_str(package.to_owned());
+            let packages: Vec<_> =
+                self.remove.iter().map(|p| parse_package_str(p.to_owned())).collect();
 
-                if let Some(version) = req_package.version {
-                    // todo: before deleting, confirm with a prompt y/n
+            let mut with_version = vec![];
+            let mut without_version = vec![];
 
-                    store.remove(req_package.name, version);
+            for pkg in packages {
+                if pkg.version.is_some() {
+                    with_version.push(pkg);
                 } else {
-                    // if there are multiple packages in $HOME/.qipi/store/name@whatever, i.e., multiple versions of the same package
-                    todo!("list them all to select which ones to delete");
+                    without_version.push(pkg);
+                }
+            }
+
+            if !with_version.is_empty() {
+                let mut p = Promptuity::new(&mut term, &mut theme);
+                p.begin().unwrap();
+                let confirmed = p
+                    .prompt(
+                        Confirm::new("Are you sure you want to remove the selected packages?")
+                            .with_default(true),
+                    )
+                    .unwrap_or(false);
+                p.finish().unwrap();
+
+                if confirmed {
+                    for pkg in with_version {
+                        store.remove(pkg.name, pkg.version.unwrap());
+                    }
+                }
+            }
+
+            if !without_version.is_empty() {
+                let mut options: Vec<MultiSelectOption<String>> = vec![];
+                for pkg in &without_version {
+                    let prefix = format!("{}@", pkg.name);
+                    let versions: Vec<_> = read_dir(&store.store_path)
+                        .unwrap()
+                        .filter_map(|entry| {
+                            let entry = entry.ok()?;
+                            let fname = entry.file_name().to_string_lossy().to_string();
+                            if fname.starts_with(&prefix) {
+                                Some(MultiSelectOption::new(fname.clone(), fname))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    options.extend(versions);
+                }
+
+                if !options.is_empty() {
+                    let mut p = Promptuity::new(&mut term, &mut theme);
+                    p.begin().unwrap();
+                    let selected: Vec<String> = p
+                        .prompt(
+                            MultiSelect::new("Select package versions to remove", options).as_mut(),
+                        )
+                        .unwrap_or_default();
+                    p.finish().unwrap();
+
+                    for sel in selected {
+                        if let Some(pos) = sel.rfind('@') {
+                            let name = &sel[..pos];
+                            let version = &sel[pos + 1..];
+                            store.remove(name.to_string(), version.to_string());
+                        }
+                    }
                 }
             }
         }

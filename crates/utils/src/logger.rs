@@ -6,7 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use promptuity::{
     Error, Promptuity, Term,
-    prompts::{Confirm, Input, MultiSelect, Number, Password, Select, SelectOption},
+    prompts::{
+        Confirm, Input, MultiSelect, MultiSelectOption, Number, Password, Select, SelectOption,
+    },
     themes::{FancyTheme, MinimalTheme},
 };
 
