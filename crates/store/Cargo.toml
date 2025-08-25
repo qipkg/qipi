@@ -1,0 +1,15 @@
+[package]
+name = "store"
+version = "0.1.0"
+edition = "2024"
+authors = ["Nehuén <https://github.com/nehu3n>"]
+license = "MIT"
+
+[dependencies]
+dirs = "6.0.0"
+utils = { path = "../utils" }
+client = { path = "../client" }
+reqwest = { version = "0.12.23", features = ["json"] }
+tokio = { version = "1.47.1", features = ["full"] }
+flate2 = "1.1.2"
+tar = "0.4.44"
