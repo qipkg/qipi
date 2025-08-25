@@ -6,3 +6,7 @@ authors = ["Nehuén <https://github.com/nehu3n>"]
 license = "MIT"
 
 [dependencies]
+async-recursion = "1.1.1"
+tokio = { version = "1.47.1", features = ["full"] }
+utils = { path = "../utils" }
+client = { path = "../client" }

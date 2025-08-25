@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use clap::Args;
 
 use client::versions::RequestPackage;
-use resolver::semver;
+use resolver::graph::DAGBuilder;
 use utils::logger::*;
 
 #[derive(Debug, Args)]
@@ -15,35 +15,24 @@ pub(crate) struct AddCommand {
 #[async_trait]
 impl Command for AddCommand {
     async fn run(&self) -> Result<(), ()> {
+        let builder = DAGBuilder::new();
+
+        let mut sorted_nodes: Vec<String> = Vec::new();
         for package in &self.packages {
             info(format!("Adding package {package}"), false);
 
             let req_package = Self::parse_package_str(package.clone());
-            let package_versions = req_package.get_package_versions().await;
 
-            if package_versions.is_empty() {
-                error(format!("No versions were found for {}", req_package.name), false);
-                continue;
-            }
+            let graph = builder.build(req_package).await;
+            sorted_nodes = graph.lock().await.topological_sort();
 
-            let available: Vec<&str> = package_versions.iter().map(|(v, _)| v.as_str()).collect();
-
-            let wanted = req_package.version.clone().unwrap_or("latest".to_string());
-            match semver::select_version(&wanted, available) {
-                Some(selected_version) => {
-                    info(format!("Selected {}@{}", req_package.name, selected_version), false)
-                }
-
-                None => {
-                    let error_msg = format!(
-                        "Could not resolve a version for {} with range {}",
-                        req_package.name, wanted
-                    );
-
-                    error(error_msg, false);
-                }
+            for node in &sorted_nodes {
+                info(format!("Installing {node}"), false);
+                // todo: install package
             }
         }
+
+        info(format!("Installation order: {sorted_nodes:?}"), false);
 
         Ok(())
     }
