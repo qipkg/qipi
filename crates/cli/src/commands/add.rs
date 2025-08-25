@@ -7,6 +7,8 @@ use resolver::graph::DAGBuilder;
 use store::Store;
 use utils::logger::*;
 
+use std::time::Instant;
+
 #[derive(Debug, Args)]
 pub(crate) struct AddCommand {
     packages: Vec<String>,
@@ -15,6 +17,8 @@ pub(crate) struct AddCommand {
 #[async_trait]
 impl Command for AddCommand {
     async fn run(&self) -> Result<(), ()> {
+        let start = Instant::now();
+
         let builder = DAGBuilder::new();
         let store = Store::new();
 
@@ -34,6 +38,9 @@ impl Command for AddCommand {
                 }
             }
         }
+
+        let duration = start.elapsed();
+        info(format!("Finished in {duration:.2?}"), false);
 
         Ok(())
     }
