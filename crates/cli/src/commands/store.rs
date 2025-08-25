@@ -6,13 +6,14 @@ use clap::{ArgGroup, Args};
 use store::Store;
 use utils::logger::*;
 
+use chrono::{DateTime, Local, TimeZone};
 use std::fs::read_dir;
 
 #[derive(Debug, Args)]
 #[clap(group(
     ArgGroup::new("action")
         .required(true)
-        .args(&["remove", "clear"])
+        .args(&["remove", "clear", "list"])
 ))]
 pub(crate) struct StoreCommand {
     #[clap(short, long, num_args = 1.., value_name = "PACKAGE")]
@@ -20,6 +21,9 @@ pub(crate) struct StoreCommand {
 
     #[clap(short, long)]
     clear: bool,
+
+    #[clap(short, long)]
+    list: bool,
 }
 
 #[async_trait]
@@ -28,6 +32,32 @@ impl Command for StoreCommand {
         let store = Store::new();
         let mut term = Term::default();
         let mut theme = MinimalTheme::default();
+
+        if self.list {
+            let packages = store.list();
+
+            if packages.is_empty() {
+                error("No packages in store", false);
+            } else {
+                println!("{:<30} {:<10} Added at", "Package", "Version");
+                println!("{}", "-".repeat(60));
+
+                for (name, version, timestamp) in packages {
+                    let ts_display = timestamp
+                        .and_then(|ts| ts.parse::<u64>().ok())
+                        .map(|secs| {
+                            let dt = DateTime::from_timestamp(secs as i64, 0).unwrap();
+                            Local
+                                .from_utc_datetime(&dt.naive_utc())
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string()
+                        })
+                        .unwrap_or_else(|| "-".to_string());
+
+                    println!("{name:<30} {version:<10} {ts_display}");
+                }
+            }
+        }
 
         if self.clear {
             let mut p = Promptuity::new(&mut term, &mut theme);

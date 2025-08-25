@@ -3,9 +3,10 @@ use flate2::read::GzDecoder;
 use tar::Archive;
 
 use std::{
-    fs::{File, create_dir_all, read_dir, remove_dir_all, remove_file, rename},
+    fs::{File, create_dir_all, metadata, read_dir, remove_dir_all, remove_file, rename},
     io::{BufReader, copy},
     path::PathBuf,
+    time::UNIX_EPOCH,
 };
 use utils::logger::*;
 
@@ -74,6 +75,37 @@ impl Store {
         }
 
         success("Store cleared", false);
+    }
+
+    pub fn list(&self) -> Vec<(String, String, Option<String>)> {
+        let mut packages = vec![];
+
+        for entry in read_dir(&self.store_path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+
+            if !path.is_dir() {
+                continue;
+            }
+
+            let metadata = metadata(&path).unwrap();
+
+            let timestamp = metadata
+                .created()
+                .or_else(|_| metadata.modified())
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs().to_string());
+
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if let Some(pos) = file_name.rfind('@') {
+                let name = &file_name[..pos];
+                let version = &file_name[pos + 1..];
+                packages.push((name.to_string(), version.to_string(), timestamp));
+            }
+        }
+
+        packages
     }
 
     async fn download_tarball(&self, name: String, version: String, url: String) {
