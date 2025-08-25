@@ -1,6 +1,7 @@
 mod commands;
 mod macros;
 
+use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 use commands::*;
 
@@ -28,31 +29,33 @@ enum Commands {
     List(ListCommand),
 }
 
+#[async_trait]
 impl Command for Commands {
-    fn run(&self) -> Result<(), ()> {
+    async fn run(&self) -> Result<(), ()> {
         match self {
-            Commands::Init(cmd) => cmd.run()?,
-            Commands::New(cmd) => cmd.run()?,
-            Commands::Add(cmd) => cmd.run()?,
-            Commands::Remove(cmd) => cmd.run()?,
-            Commands::Install(cmd) => cmd.run()?,
-            Commands::Uninstall(cmd) => cmd.run()?,
-            Commands::Shell(cmd) => cmd.run()?,
-            Commands::Mount(cmd) => cmd.run()?,
-            Commands::Umount(cmd) => cmd.run()?,
-            Commands::Lock(cmd) => cmd.run()?,
-            Commands::List(cmd) => cmd.run()?,
+            Commands::Init(cmd) => cmd.run().await?,
+            Commands::New(cmd) => cmd.run().await?,
+            Commands::Add(cmd) => cmd.run().await?,
+            Commands::Remove(cmd) => cmd.run().await?,
+            Commands::Install(cmd) => cmd.run().await?,
+            Commands::Uninstall(cmd) => cmd.run().await?,
+            Commands::Shell(cmd) => cmd.run().await?,
+            Commands::Mount(cmd) => cmd.run().await?,
+            Commands::Umount(cmd) => cmd.run().await?,
+            Commands::Lock(cmd) => cmd.run().await?,
+            Commands::List(cmd) => cmd.run().await?,
         }
 
         Ok(())
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     if let Some(cmd) = cli.command {
-        if cmd.run().is_err() {
+        if cmd.run().await.is_err() {
             std::process::exit(1);
         }
     }

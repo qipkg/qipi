@@ -1,4 +1,6 @@
 use crate::Command;
+use async_trait::async_trait;
+
 use clap::Args;
 
 use std::{
@@ -18,8 +20,9 @@ pub(crate) struct NewCommand {
     auto_shell: bool,
 }
 
+#[async_trait]
 impl Command for NewCommand {
-    fn run(&self) -> Result<(), ()> {
+    async fn run(&self) -> Result<(), ()> {
         let path = Path::new(&self.path);
 
         if path.exists() {

@@ -9,3 +9,5 @@ license = "MIT"
 clap = { version = "4.5.41", features = ["derive"] }
 paste = "1.0.15"
 utils = { path = "../utils" }
+async-trait = "0.1.89"
+tokio = { version = "1.47.1", features = ["full"] }

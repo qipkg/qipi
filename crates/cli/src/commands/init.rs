@@ -1,4 +1,6 @@
 use crate::Command;
+use async_trait::async_trait;
+
 use clap::Args;
 
 use std::{env::current_dir, fs::write, path::Path};
@@ -13,8 +15,9 @@ pub(crate) struct InitCommand {
     auto_shell: bool,
 }
 
+#[async_trait]
 impl Command for InitCommand {
-    fn run(&self) -> Result<(), ()> {
+    async fn run(&self) -> Result<(), ()> {
         let path = Path::new(".");
 
         let workspace_json_path = path.join("workspace.json");
