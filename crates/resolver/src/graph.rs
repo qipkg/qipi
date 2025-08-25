@@ -58,13 +58,88 @@ impl DependencyGraph {
             }
         }
 
+        let remaining: Vec<String> = indegree
+            .iter()
+            .filter_map(|(&pkg, &deg)| if deg > 0 { Some(pkg.clone()) } else { None })
+            .collect();
+
+        if !remaining.is_empty() {
+            warn(
+                format!(
+                    "Circular dependencies detected: {remaining:?} - will be resolved at runtime"
+                ),
+                false,
+            );
+            result.extend(remaining);
+        }
+
         result
+    }
+
+    pub fn detect_cycles(&self) -> Vec<Vec<String>> {
+        let mut cycles = Vec::new();
+        let mut visited = HashSet::new();
+        let mut rec_stack = HashSet::new();
+
+        for package in self.nodes.keys() {
+            if !visited.contains(package) {
+                let mut path = Vec::new();
+                if let Some(cycle) =
+                    self.dfs_cycle_detection(package, &mut visited, &mut rec_stack, &mut path)
+                {
+                    cycles.push(cycle);
+                }
+            }
+        }
+
+        cycles
+    }
+
+    fn dfs_cycle_detection(
+        &self,
+        package: &String,
+        visited: &mut HashSet<String>,
+        rec_stack: &mut HashSet<String>,
+        path: &mut Vec<String>,
+    ) -> Option<Vec<String>> {
+        visited.insert(package.clone());
+        rec_stack.insert(package.clone());
+        path.push(package.clone());
+
+        if let Some(node) = self.nodes.get(package) {
+            for dep in &node.dependencies {
+                if !visited.contains(dep) {
+                    if let Some(cycle) = self.dfs_cycle_detection(dep, visited, rec_stack, path) {
+                        return Some(cycle);
+                    }
+                } else if rec_stack.contains(dep) {
+                    if let Some(cycle_start_pos) = path.iter().position(|p| p == dep) {
+                        let mut cycle = path[cycle_start_pos..].to_vec();
+                        cycle.push(dep.clone());
+                        return Some(cycle);
+                    } else {
+                        warn(
+                            format!(
+                                "Detected cycle edge case: {package} -> {dep} (dep in rec_stack but not in path)"
+                            ),
+                            false,
+                        );
+                        return Some(vec![package.clone(), dep.clone()]);
+                    }
+                }
+            }
+        }
+
+        path.pop();
+        rec_stack.remove(package);
+        None
     }
 }
 
 pub struct DAGBuilder {
     visited: Arc<Mutex<HashSet<String>>>,
     graph: Arc<Mutex<DependencyGraph>>,
+    resolution_path: Arc<Mutex<Vec<String>>>,
 }
 
 impl DAGBuilder {
@@ -72,11 +147,23 @@ impl DAGBuilder {
         Self {
             visited: Arc::new(Mutex::new(HashSet::new())),
             graph: Arc::new(Mutex::new(DependencyGraph::new())),
+            resolution_path: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub async fn build(&self, package: RequestPackage) -> Arc<Mutex<DependencyGraph>> {
         self.resolve_package(package).await;
+
+        let graph = self.graph.lock().await;
+        let cycles = graph.detect_cycles();
+        if !cycles.is_empty() {
+            warn(
+                format!("Circular dependencies detected (will be handled at runtime): {cycles:?}"),
+                false,
+            );
+        }
+        drop(graph);
+
         self.graph.clone()
     }
 
@@ -88,49 +175,85 @@ impl DAGBuilder {
         let key = format!("{name}@{version_req}");
 
         {
+            let path = self.resolution_path.lock().await;
+            if path.contains(&key) {
+                warn(format!("Circular dependency detected during resolution: {key}"), false);
+                return Some(key);
+            }
+        }
+
+        {
             let visited = self.visited.lock().await;
             if visited.contains(&key) {
                 return Some(key);
             }
         }
 
-        let versions = package.get_package_versions().await;
-        if versions.is_empty() {
-            error(format!("No versions found for {name}"), false);
-            return None;
+        {
+            let mut path = self.resolution_path.lock().await;
+            path.push(key.clone());
         }
 
-        let available: Vec<&str> = versions.iter().map(|(v, _)| v.as_str()).collect();
-        let selected_version = semver::select_version(&version_req, available)?;
+        let result = async {
+            let versions = package.get_package_versions().await;
+            if versions.is_empty() {
+                error(format!("No versions found for {name}"), false);
+                return None;
+            }
 
-        let pkg_version = versions.into_iter().find(|(v, _)| v == &selected_version).unwrap().1;
+            let available: Vec<&str> = versions.iter().map(|(v, _)| v.as_str()).collect();
+            let selected_version = semver::select_version(&version_req, available)?;
 
-        let mut dep_keys = Vec::new();
+            let pkg_version = match versions.into_iter().find(|(v, _)| v == &selected_version) {
+                Some((_, version_data)) => version_data,
+                None => {
+                    let err_msg = format!("Selected version {selected_version} for {name} not found in available versions");
+                    error(err_msg, false);
 
-        if let Some(deps) = pkg_version.dependencies.clone() {
-            for (dep_name, dep_range) in deps {
-                let dep_pkg =
-                    RequestPackage { name: dep_name.clone(), version: Some(dep_range.clone()) };
-                if let Some(dep_key) = self.resolve_package(dep_pkg).await {
-                    dep_keys.push(dep_key);
+                    return None;
                 }
+            };
+
+            let mut dep_keys = Vec::new();
+
+            if let Some(deps) = pkg_version.dependencies.clone() {
+                for (dep_name, dep_range) in deps {
+                    let dep_pkg =
+                        RequestPackage { name: dep_name.clone(), version: Some(dep_range.clone()) };
+                    if let Some(dep_key) = self.resolve_package(dep_pkg).await {
+                        dep_keys.push(dep_key);
+                    } else {
+                        warn(format!("Could not resolve dependency: {dep_name}"), false);
+                    }
+                }
+            }
+
+            let final_key = format!("{name}@{selected_version}");
+            let node = DAGNode { package: final_key.clone(), dependencies: dep_keys };
+
+            {
+                let mut graph = self.graph.lock().await;
+                graph.add_node(node);
+            }
+
+            {
+                let mut visited = self.visited.lock().await;
+                visited.insert(key.clone());
+                visited.insert(final_key.clone());
+            }
+
+            Some(final_key)
+        }
+        .await;
+
+        {
+            let mut path = self.resolution_path.lock().await;
+            if let Some(pos) = path.iter().rposition(|p| p == &key) {
+                path.remove(pos);
             }
         }
 
-        let node =
-            DAGNode { package: format!("{name}@{selected_version}"), dependencies: dep_keys };
-
-        {
-            let mut graph = self.graph.lock().await;
-            graph.add_node(node);
-        }
-
-        {
-            let mut visited = self.visited.lock().await;
-            visited.insert(key.clone());
-        }
-
-        Some(format!("{name}@{selected_version}"))
+        result
     }
 }
 
