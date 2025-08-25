@@ -13,3 +13,4 @@ async-trait = "0.1.89"
 tokio = { version = "1.47.1", features = ["full"] }
 client = { path = "../client" }
 resolver = { path = "../resolver" }
+store = { path = "../store" }

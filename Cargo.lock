@@ -991,6 +991,7 @@ dependencies = [
  "client",
  "paste",
  "resolver",
+ "store",
  "tokio",
  "utils",
 ]

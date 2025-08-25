@@ -5,6 +5,7 @@ use clap::Args;
 
 use client::versions::RequestPackage;
 use resolver::graph::DAGBuilder;
+use store::Store;
 use utils::logger::*;
 
 #[derive(Debug, Args)]
@@ -16,23 +17,24 @@ pub(crate) struct AddCommand {
 impl Command for AddCommand {
     async fn run(&self) -> Result<(), ()> {
         let builder = DAGBuilder::new();
+        let store = Store::new();
 
-        let mut sorted_nodes: Vec<String> = Vec::new();
         for package in &self.packages {
             info(format!("Adding package {package}"), false);
 
             let req_package = Self::parse_package_str(package.clone());
-
+            
             let graph = builder.build(req_package).await;
-            sorted_nodes = graph.lock().await.topological_sort();
+            let sorted_nodes = graph.lock().await.topological_sort();
 
             for node in &sorted_nodes {
                 info(format!("Installing {node}"), false);
-                // todo: install package
+
+                if let Some(dag_node) = graph.lock().await.nodes.get(node) {
+                    store.add_package(dag_node.info.clone()).await;
+                }
             }
         }
-
-        info(format!("Installation order: {sorted_nodes:?}"), false);
 
         Ok(())
     }
