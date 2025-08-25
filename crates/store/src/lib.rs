@@ -43,6 +43,39 @@ impl Store {
         self.download_tarball(name, version, package.dist.tarball).await;
     }
 
+    pub fn remove(&self, name: String, version: String) {
+        let package_key = format!("{name}@{version}");
+
+        let package_path = self.store_path.join(&package_key);
+        if !package_path.exists() {
+            error(format!("The package {package_key} does not exist in the store"), false);
+            return;
+        }
+
+        remove_dir_all(package_path).unwrap();
+
+        success(format!("The package {package_key} was removed from store"), false);
+    }
+
+    pub fn clear(&self) {
+        if !self.store_path.exists() {
+            error("Store directory does not exist", false);
+            return;
+        }
+
+        let entries = read_dir(&self.store_path).unwrap();
+        for entry in entries {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                remove_dir_all(&path).unwrap();
+                info(format!("Removed {}", path.display()), false);
+            }
+        }
+
+        success("Store cleared", false);
+    }
+
     async fn download_tarball(&self, name: String, version: String, url: String) {
         let package_path = &self.store_path.join(format!("{name}@{version}"));
 
