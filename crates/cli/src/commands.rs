@@ -6,4 +6,6 @@ pub(crate) trait Command {
     async fn run(&self) -> Result<(), ()>;
 }
 
-register_commands!(new, init, add, remove, install, uninstall, shell, mount, umount, lock, list);
+register_commands!(
+    new, init, add, remove, install, uninstall, shell, mount, umount, lock, list, store
+);

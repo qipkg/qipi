@@ -27,6 +27,7 @@ enum Commands {
     Umount(UmountCommand),
     Lock(LockCommand),
     List(ListCommand),
+    Store(StoreCommand),
 }
 
 #[async_trait]
@@ -44,6 +45,7 @@ impl Command for Commands {
             Commands::Umount(cmd) => cmd.run().await?,
             Commands::Lock(cmd) => cmd.run().await?,
             Commands::List(cmd) => cmd.run().await?,
+            Commands::Store(cmd) => cmd.run().await?,
         }
 
         Ok(())
