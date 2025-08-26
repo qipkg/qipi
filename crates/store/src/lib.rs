@@ -1,17 +1,20 @@
 use client::registry::PackageVersion;
 use flate2::read::GzDecoder;
+use reqwest::Client;
 use tar::Archive;
 
 use std::{
     fs::{File, create_dir_all, metadata, read_dir, remove_dir_all, remove_file, rename},
     io::{BufReader, copy},
     path::PathBuf,
-    time::UNIX_EPOCH,
+    sync::Arc,
+    time::{Duration, UNIX_EPOCH},
 };
 use utils::logger::*;
 
 pub struct Store {
     pub store_path: PathBuf,
+    pub client: Arc<Client>,
 }
 
 impl Store {
@@ -24,7 +27,19 @@ impl Store {
             info("Store directory created", false);
         }
 
-        Self { store_path }
+        Self { store_path, client: Arc::new(Self::create_client()) }
+    }
+
+    fn create_client() -> Client {
+        Client::builder()
+            .tcp_keepalive(Duration::from_secs(60))
+            .pool_max_idle_per_host(100)
+            .pool_idle_timeout(Duration::from_secs(300))
+            .timeout(Duration::from_secs(8))
+            .connect_timeout(Duration::from_secs(3))
+            .tcp_nodelay(true)
+            .build()
+            .unwrap_or_else(|_| Client::new())
     }
 
     pub async fn add_package(&self, package: PackageVersion) {
