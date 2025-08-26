@@ -164,17 +164,23 @@ impl Store {
     }
 
     pub fn remove(&self, name: String, version: String) {
-        let package_key = format!("{name}@{version}");
-
-        let package_path = self.store_path.join(&package_key);
-        if !package_path.exists() {
-            error(format!("The package {package_key} does not exist in the store"), false);
+        let package_path = self.store_path.join(format!("{name}@{version}"));
+        if package_path.exists() {
+            let _ = remove_dir_all(&package_path);
             return;
         }
 
-        remove_dir_all(package_path).unwrap();
-
-        success(format!("The package {package_key} was removed from store"), false);
+        match read_dir(&self.store_path) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        let _ = remove_dir_all(entry.path());
+                    }
+                }
+                success("Store cleared", false);
+            }
+            Err(e) => error(format!("Failed to read store directory: {e}"), false),
+        }
     }
 
     pub fn clear(&self) {
@@ -197,34 +203,31 @@ impl Store {
     }
 
     pub fn list(&self) -> Vec<(String, String, Option<String>)> {
-        let mut packages = vec![];
+        let Ok(entries) = read_dir(&self.store_path) else {
+            return Vec::new();
+        };
 
-        for entry in read_dir(&self.store_path).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
+        entries
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if let Some(pos) = file_name.rfind('@') {
+                    let (name, version) = file_name.split_at(pos);
+                    let version = &version[1..];
 
-            if !path.is_dir() {
-                continue;
-            }
+                    let timestamp = metadata(entry.path())
+                        .ok()
+                        .and_then(|meta| meta.created().or_else(|_| meta.modified()).ok())
+                        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                        .map(|dur| dur.as_secs().to_string());
 
-            let metadata = metadata(&path).unwrap();
-
-            let timestamp = metadata
-                .created()
-                .or_else(|_| metadata.modified())
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs().to_string());
-
-            let file_name = entry.file_name().to_string_lossy().to_string();
-            if let Some(pos) = file_name.rfind('@') {
-                let name = &file_name[..pos];
-                let version = &file_name[pos + 1..];
-                packages.push((name.to_string(), version.to_string(), timestamp));
-            }
-        }
-
-        packages
+                    Some((name.to_string(), version.to_string(), timestamp))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
