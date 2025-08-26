@@ -4,7 +4,7 @@ use reqwest::Client;
 use tar::Archive;
 
 use futures_util::StreamExt;
-use tokio::{fs::File as TokioFile, io::AsyncWriteExt, task::spawn_blocking};
+use tokio::{fs::File as TokioFile, io::AsyncWriteExt, sync::Semaphore, task::spawn_blocking};
 
 use std::{
     error::Error,
@@ -19,6 +19,8 @@ use utils::logger::*;
 pub struct Store {
     pub store_path: PathBuf,
     pub client: Arc<Client>,
+    pub download_semaphore: Arc<Semaphore>,
+    pub extract_semaphore: Arc<Semaphore>,
 }
 
 impl Store {
@@ -31,7 +33,12 @@ impl Store {
             info("Store directory created", false);
         }
 
-        Self { store_path, client: Arc::new(Self::create_client()) }
+        Self {
+            store_path,
+            client: Arc::new(Self::create_client()),
+            download_semaphore: Arc::new(Semaphore::new(50)),
+            extract_semaphore: Arc::new(Semaphore::new(20)),
+        }
     }
 
     fn create_client() -> Client {
