@@ -10,23 +10,27 @@ pub struct SemVer {
 
 impl SemVer {
     pub fn parse(s: &str) -> Option<Self> {
-        let mut parts = s.splitn(2, '-');
-
-        let main = parts.next()?;
-        let pre = parts.next().map(|s| s.to_string());
-
-        let nums: Vec<&str> = main.split('.').collect();
-
-        if nums.len() != 3 {
+        if s.is_empty() {
             return None;
         }
 
-        Some(Self {
-            major: nums[0].parse().ok()?,
-            minor: nums[1].parse().ok()?,
-            patch: nums[2].parse().ok()?,
-            pre,
-        })
+        let (main, pre) = if let Some(dash_pos) = s.find('-') {
+            let (main_part, pre_part) = s.split_at(dash_pos);
+            (main_part, Some(pre_part[1..].to_string()))
+        } else {
+            (s, None)
+        };
+
+        let mut parts = main.splitn(3, '.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        let patch = parts.next()?.parse().ok()?;
+
+        if parts.next().is_some() {
+            return None;
+        }
+
+        Some(Self { major, minor, patch, pre })
     }
 }
 
@@ -40,8 +44,8 @@ impl Ord for SemVer {
     fn cmp(&self, other: &Self) -> Ordering {
         self.major
             .cmp(&other.major)
-            .then(self.minor.cmp(&other.minor))
-            .then(self.patch.cmp(&other.patch))
+            .then_with(|| self.minor.cmp(&other.minor))
+            .then_with(|| self.patch.cmp(&other.patch))
             .then_with(|| match (&self.pre, &other.pre) {
                 (None, None) => Ordering::Equal,
                 (None, Some(_)) => Ordering::Greater,
@@ -58,44 +62,40 @@ fn semver_satisfies(version: &SemVer, range: &str) -> bool {
         return true;
     }
 
-    if let Some(stripped) = range.strip_prefix('^') {
-        if let Some(min) = SemVer::parse(stripped) {
-            return *version >= min && version.major == min.major;
+    match range.chars().next() {
+        Some('^') => {
+            if let Some(min) = SemVer::parse(&range[1..]) {
+                return *version >= min && version.major == min.major;
+            }
         }
-    }
-
-    if let Some(stripped) = range.strip_prefix('~') {
-        if let Some(min) = SemVer::parse(stripped) {
-            return *version >= min && version.major == min.major && version.minor == min.minor;
+        Some('~') => {
+            if let Some(min) = SemVer::parse(&range[1..]) {
+                return *version >= min && version.major == min.major && version.minor == min.minor;
+            }
         }
-    }
-
-    if let Some(stripped) = range.strip_prefix(">=") {
-        if let Some(min) = SemVer::parse(stripped) {
-            return *version >= min;
+        Some('>') => {
+            if let Some(stripped) = range.strip_prefix(">=") {
+                if let Some(min) = SemVer::parse(stripped) {
+                    return *version >= min;
+                }
+            } else if let Some(min) = SemVer::parse(&range[1..]) {
+                return *version > min;
+            }
         }
-    }
-
-    if let Some(stripped) = range.strip_prefix("<=") {
-        if let Some(max) = SemVer::parse(stripped) {
-            return *version <= max;
+        Some('<') => {
+            if let Some(stripped) = range.strip_prefix("<=") {
+                if let Some(max) = SemVer::parse(stripped) {
+                    return *version <= max;
+                }
+            } else if let Some(max) = SemVer::parse(&range[1..]) {
+                return *version < max;
+            }
         }
-    }
-
-    if let Some(stripped) = range.strip_prefix('>') {
-        if let Some(min) = SemVer::parse(stripped) {
-            return *version > min;
+        _ => {
+            if let Some(exact) = SemVer::parse(range) {
+                return *version == exact;
+            }
         }
-    }
-
-    if let Some(stripped) = range.strip_prefix('<') {
-        if let Some(max) = SemVer::parse(stripped) {
-            return *version < max;
-        }
-    }
-
-    if let Some(exact) = SemVer::parse(range) {
-        return *version == exact;
     }
 
     false
@@ -103,33 +103,37 @@ fn semver_satisfies(version: &SemVer, range: &str) -> bool {
 
 fn satisfies_composite(version: &SemVer, composite: &str) -> bool {
     let composite = composite.trim();
-    let allow_prerelease = composite.split("||").any(|r| r.contains('-'));
 
+    let allow_prerelease = composite.contains('-');
     if version.pre.is_some() && !allow_prerelease {
         return false;
     }
 
-    composite.split("||").any(|r| semver_satisfies(version, r))
+    composite.split("||").any(|range| semver_satisfies(version, range.trim()))
 }
 
 pub fn select_version(range: &str, available: Vec<&str>) -> Option<String> {
-    let mut compatible: Vec<SemVer> = vec![];
+    let mut compatible = Vec::with_capacity(available.len().min(32));
 
-    for v in available {
-        if let Some(ver) = SemVer::parse(v) {
-            if satisfies_composite(&ver, range) {
-                compatible.push(ver);
+    for version_str in available {
+        if let Some(version) = SemVer::parse(version_str) {
+            if satisfies_composite(&version, range) {
+                compatible.push(version);
             }
         }
     }
 
-    compatible.sort();
+    if compatible.is_empty() {
+        return None;
+    }
 
-    compatible.last().map(|v| {
-        if let Some(pre) = &v.pre {
-            format!("{}.{}.{}-{}", v.major, v.minor, v.patch, pre)
-        } else {
-            format!("{}.{}.{}", v.major, v.minor, v.patch)
+    compatible.sort_unstable();
+    let best_version = compatible.into_iter().last()?;
+
+    Some(match &best_version.pre {
+        Some(pre) => {
+            format!("{}.{}.{}-{}", best_version.major, best_version.minor, best_version.patch, pre)
         }
+        None => format!("{}.{}.{}", best_version.major, best_version.minor, best_version.patch),
     })
 }
