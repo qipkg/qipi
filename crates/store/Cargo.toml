@@ -14,3 +14,4 @@ tokio = { version = "1.47.1", features = ["full"] }
 flate2 = "1.1.2"
 tar = "0.4.44"
 futures-util = "0.3.31"
+futures = "0.3.31"

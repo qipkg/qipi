@@ -3,13 +3,14 @@ use flate2::read::GzDecoder;
 use reqwest::Client;
 use tar::Archive;
 
+use futures::future::join_all;
 use futures_util::StreamExt;
 use tokio::{fs::File as TokioFile, io::AsyncWriteExt, sync::Semaphore, task::spawn_blocking};
 
 use std::{
     error::Error,
     fs::{File, create_dir_all, metadata, read_dir, remove_dir_all, remove_file, rename},
-    io::{BufReader, copy},
+    io::BufReader,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
@@ -107,19 +108,59 @@ impl Store {
         .await?
     }
 
-    pub async fn add_package(&self, package: PackageVersion) {
-        let name = package.name;
-        let version = package.version;
+    pub async fn install_packages(&self, packages: Vec<PackageVersion>) -> Vec<String> {
+        let packages_to_install: Vec<_> = packages
+            .into_iter()
+            .filter(|pkg| {
+                let package_key = format!("{}@{}", pkg.name, pkg.version);
+                !self.store_path.join(&package_key).exists()
+            })
+            .collect();
 
-        let package_path = &self.store_path.join(format!("{name}@{version}"));
-
-        if package_path.exists() {
-            return;
+        if packages_to_install.is_empty() {
+            return Vec::new();
         }
 
-        create_dir_all(package_path).unwrap();
+        let futures = packages_to_install.into_iter().map(|pkg| self.download_extract(pkg));
+        let results = join_all(futures).await;
+        results.into_iter().flatten().collect()
+    }
 
-        self.download_tarball(name, version, package.dist.tarball).await;
+    async fn download_extract(&self, package: PackageVersion) -> Option<String> {
+        let package_key = format!("{}@{}", package.name, package.version);
+        let package_path = self.store_path.join(&package_key);
+
+        if create_dir_all(&package_path).is_err() {
+            return None;
+        }
+
+        let download_result = self.download(&package.dist.tarball, &package_path).await;
+
+        match download_result {
+            Ok(tarball_path) => {
+                let extract_result = self.extract(tarball_path, package_path).await;
+
+                match extract_result {
+                    Ok(_) => Some(package_key),
+                    Err(_) => {
+                        let _ = remove_dir_all(self.store_path.join(&package_key));
+                        None
+                    }
+                }
+            }
+            Err(_) => {
+                let _ = remove_dir_all(&package_path);
+                None
+            }
+        }
+    }
+
+    pub async fn add_packages(&self, packages: Vec<PackageVersion>) -> Vec<String> {
+        self.install_packages(packages).await
+    }
+
+    pub async fn add_package(&self, package: PackageVersion) {
+        self.install_packages(vec![package]).await;
     }
 
     pub fn remove(&self, name: String, version: String) {
@@ -184,36 +225,6 @@ impl Store {
         }
 
         packages
-    }
-
-    async fn download_tarball(&self, name: String, version: String, url: String) {
-        let package_path = &self.store_path.join(format!("{name}@{version}"));
-
-        let res = reqwest::get(url).await.unwrap();
-        let bytes = res.bytes().await.unwrap();
-        let tarball_path = package_path.join("tarball.tgz");
-
-        let mut dest = File::create(&tarball_path).unwrap();
-        copy(&mut bytes.as_ref(), &mut dest).unwrap();
-
-        let tar_gz = File::open(&tarball_path).unwrap();
-        let tar = GzDecoder::new(BufReader::new(tar_gz));
-        let mut archive = Archive::new(tar);
-        archive.unpack(package_path).unwrap();
-
-        let inner = package_path.join("package");
-        if inner.exists() {
-            for entry in read_dir(&inner).unwrap() {
-                let entry = entry.unwrap();
-                let dest = package_path.join(entry.file_name());
-                rename(entry.path(), dest).unwrap();
-            }
-            remove_dir_all(inner).unwrap();
-        }
-
-        remove_file(tarball_path).unwrap();
-
-        success(format!("Package {name}@{version} installed"), false);
     }
 }
 
