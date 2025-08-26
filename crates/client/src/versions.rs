@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
 
+use reqwest::Client;
 use tokio::sync::RwLock;
+
+use utils::logger::*;
 
 #[derive(Clone)]
 struct CacheEntry {
@@ -41,18 +44,38 @@ impl RequestPackage {
             }
         }
 
-        let registry_url = format!("https://registry.npmjs.com/{}", self.name);
-        let req_get = reqwest::get(registry_url).await;
+        static CLIENT: Lazy<Client> = Lazy::new(|| {
+            Client::builder()
+                .tcp_keepalive(Duration::from_secs(60))
+                .pool_max_idle_per_host(30)
+                .pool_idle_timeout(Duration::from_secs(120))
+                .timeout(Duration::from_secs(10))
+                .connect_timeout(Duration::from_secs(5))
+                .build()
+                .unwrap_or_else(|_| Client::new())
+        });
 
-        let mut versions: Vec<(String, PackageVersion)> = vec![];
-        match req_get {
-            Ok(res) => {
-                let res_json: RegistryPackage = res.json().await.unwrap();
-                for (version_str, pkg_version) in res_json.versions.iter() {
-                    versions.push((version_str.clone(), pkg_version.clone()));
+        let registry_url = format!("https://registry.npmjs.com/{}", self.name);
+
+        let versions = match CLIENT.get(&registry_url).send().await {
+            Ok(response) => match response.json::<RegistryPackage>().await {
+                Ok(registry_package) => {
+                    let mut versions = Vec::with_capacity(registry_package.versions.len());
+                    for (version_str, pkg_version) in registry_package.versions {
+                        versions.push((version_str, pkg_version));
+                    }
+
+                    versions
                 }
+                Err(e) => {
+                    error(format!("json parse error for {}: {e}", self.name), false);
+                    Vec::new()
+                }
+            },
+            Err(err) => {
+                error(format!("http error for {}: {err}", self.name), false);
+                Vec::new()
             }
-            Err(_err) => {}
         };
 
         if !versions.is_empty() {
