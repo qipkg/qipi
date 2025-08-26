@@ -3,10 +3,14 @@ use flate2::read::GzDecoder;
 use reqwest::Client;
 use tar::Archive;
 
+use futures_util::StreamExt;
+use tokio::{fs::File as TokioFile, io::AsyncWriteExt};
+
 use std::{
+    error::Error,
     fs::{File, create_dir_all, metadata, read_dir, remove_dir_all, remove_file, rename},
     io::{BufReader, copy},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
 };
@@ -40,6 +44,27 @@ impl Store {
             .tcp_nodelay(true)
             .build()
             .unwrap_or_else(|_| Client::new())
+    }
+
+    #[allow(dead_code)]
+    async fn download(
+        &self,
+        url: &str,
+        package_path: &Path,
+    ) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
+        let response = self.client.get(url).send().await?;
+
+        let tarball_path = package_path.join("package.tgz");
+        let mut file = TokioFile::create(&tarball_path).await?;
+
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            file.write_all(&chunk).await?;
+        }
+
+        file.flush().await?;
+        Ok(tarball_path)
     }
 
     pub async fn add_package(&self, package: PackageVersion) {

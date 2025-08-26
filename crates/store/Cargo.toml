@@ -9,7 +9,8 @@ license = "MIT"
 dirs = "6.0.0"
 utils = { path = "../utils" }
 client = { path = "../client" }
-reqwest = { version = "0.12.23", features = ["json"] }
+reqwest = { version = "0.12.23", features = ["json", "stream"] }
 tokio = { version = "1.47.1", features = ["full"] }
 flate2 = "1.1.2"
 tar = "0.4.44"
+futures-util = "0.3.31"
