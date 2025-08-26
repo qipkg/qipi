@@ -19,12 +19,10 @@ impl Store {
         let home_dir = dirs::home_dir().unwrap();
         let store_path = home_dir.join(".qipi").join("store");
 
-        if store_path.exists() {
-            return Self { store_path };
+        if !store_path.exists() {
+            create_dir_all(&store_path).unwrap();
+            info("Store directory created", false);
         }
-
-        create_dir_all(&store_path).unwrap();
-        info("Store directory created", false);
 
         Self { store_path }
     }
