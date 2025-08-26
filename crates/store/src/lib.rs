@@ -4,7 +4,7 @@ use reqwest::Client;
 use tar::Archive;
 
 use futures_util::StreamExt;
-use tokio::{fs::File as TokioFile, io::AsyncWriteExt};
+use tokio::{fs::File as TokioFile, io::AsyncWriteExt, task::spawn_blocking};
 
 use std::{
     error::Error,
@@ -65,6 +65,39 @@ impl Store {
 
         file.flush().await?;
         Ok(tarball_path)
+    }
+
+    #[allow(dead_code)]
+    async fn extract(
+        &self,
+        tarball_path: PathBuf,
+        package_path: PathBuf,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        spawn_blocking(move || -> Result<(), Box<dyn Error + Send + Sync>> {
+            let file = File::open(&tarball_path)?;
+            let decoder = GzDecoder::new(BufReader::new(file));
+            let mut archive = Archive::new(decoder);
+
+            archive.set_preserve_permissions(false);
+            archive.set_preserve_mtime(false);
+            archive.unpack(&package_path)?;
+
+            let inner_path = package_path.join("package");
+            if inner_path.exists() {
+                for entry in read_dir(&inner_path)? {
+                    let entry = entry?;
+                    let dest = package_path.join(entry.file_name());
+                    if !dest.exists() {
+                        let _ = rename(entry.path(), dest);
+                    }
+                }
+                let _ = remove_dir_all(inner_path);
+            }
+
+            let _ = remove_file(&tarball_path);
+            Ok(())
+        })
+        .await?
     }
 
     pub async fn add_package(&self, package: PackageVersion) {
