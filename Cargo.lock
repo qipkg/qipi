@@ -1153,6 +1153,7 @@ dependencies = [
  "chrono",
  "clap",
  "client",
+ "futures",
  "paste",
  "resolver",
  "store",
