@@ -28,12 +28,12 @@ impl Command for AddCommand {
             let req_package = parse_package_str(package.clone());
 
             let graph = builder.build(req_package).await;
-            let sorted_nodes = graph.lock().await.topological_sort();
+            let sorted_nodes = graph.read().await.topological_sort();
 
             for node in &sorted_nodes {
                 info(format!("Installing {node}"), false);
 
-                if let Some(dag_node) = graph.lock().await.nodes.get(node) {
+                if let Some(dag_node) = graph.read().await.nodes.get(node) {
                     store.add_package(dag_node.info.clone()).await;
                 }
             }

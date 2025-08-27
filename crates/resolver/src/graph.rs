@@ -1,12 +1,22 @@
-use async_recursion::async_recursion;
-use tokio::sync::Mutex;
+use once_cell::sync::Lazy;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+use futures::future::{FutureExt, join_all, ready};
+use tokio::sync::{RwLock, Semaphore};
 
 use crate::semver;
 use client::{registry::PackageVersion, versions::RequestPackage};
-use utils::logger::*;
+
+type PackageVersionsMap = HashMap<String, Vec<(String, PackageVersion)>>;
+type SharedPackageCache = Arc<RwLock<PackageVersionsMap>>;
+
+static GLOBAL_PACKAGE_CACHE: Lazy<SharedPackageCache> =
+    Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
+
+static GLOBAL_RESOLUTION_CACHE: Lazy<Arc<RwLock<HashMap<String, String>>>> =
+    Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
 
 #[derive(Debug, Clone)]
 pub struct DAGNode {
@@ -25,236 +35,196 @@ impl DependencyGraph {
         Self { nodes: HashMap::new() }
     }
 
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { nodes: HashMap::with_capacity(capacity) }
+    }
+
     pub fn add_node(&mut self, node: DAGNode) {
         self.nodes.insert(node.package.clone(), node);
     }
 
     pub fn topological_sort(&self) -> Vec<String> {
-        let mut indegree: HashMap<&String, usize> = HashMap::new();
-
-        for (pkg, node) in &self.nodes {
-            indegree.entry(pkg).or_insert(0);
-            for dep in &node.dependencies {
-                *indegree.entry(dep).or_insert(0) += 1;
-            }
+        if self.nodes.is_empty() {
+            return Vec::new();
         }
 
-        let mut queue: VecDeque<&String> = indegree
-            .iter()
-            .filter_map(|(&pkg, &deg)| if deg == 0 { Some(pkg) } else { None })
-            .collect();
+        let mut result = Vec::with_capacity(self.nodes.len());
+        let mut processed = HashSet::with_capacity(self.nodes.len());
 
-        let mut result = Vec::new();
-        while let Some(pkg) = queue.pop_front() {
-            result.push(pkg.clone());
-            if let Some(node) = self.nodes.get(pkg) {
+        fn dfs_visit(
+            pkg: &str,
+            graph: &HashMap<String, DAGNode>,
+            result: &mut Vec<String>,
+            processed: &mut HashSet<String>,
+        ) {
+            if processed.contains(pkg) {
+                return;
+            }
+
+            processed.insert(pkg.to_string());
+
+            if let Some(node) = graph.get(pkg) {
                 for dep in &node.dependencies {
-                    if let Some(deg) = indegree.get_mut(dep) {
-                        *deg -= 1;
-                        if *deg == 0 {
-                            queue.push_back(dep);
+                    dfs_visit(dep, graph, result, processed);
+                }
+            }
+
+            result.push(pkg.to_string());
+        }
+
+        for pkg in self.nodes.keys() {
+            dfs_visit(pkg, &self.nodes, &mut result, &mut processed);
+        }
+
+        result
+    }
+}
+
+pub struct DAGBuilder {
+    resolution_cache: Arc<RwLock<HashMap<String, String>>>,
+    semaphore: Arc<Semaphore>,
+}
+
+impl DAGBuilder {
+    pub fn new() -> Self {
+        Self {
+            resolution_cache: GLOBAL_RESOLUTION_CACHE.clone(),
+            semaphore: Arc::new(Semaphore::new(100)),
+        }
+    }
+
+    pub async fn build(&self, package: RequestPackage) -> Arc<RwLock<DependencyGraph>> {
+        let nodes = self.internal_build(package).await;
+
+        let mut graph = DependencyGraph::with_capacity(nodes.len());
+        for (_, node) in nodes {
+            graph.add_node(node);
+        }
+
+        Arc::new(RwLock::new(graph))
+    }
+
+    async fn internal_build(&self, package: RequestPackage) -> HashMap<String, DAGNode> {
+        let mut all_packages = HashSet::new();
+        let mut to_resolve = vec![package];
+
+        while !to_resolve.is_empty() {
+            let current_batch = std::mem::take(&mut to_resolve);
+
+            let futures = current_batch.into_iter().map(|pkg| {
+                let semaphore = self.semaphore.clone();
+                async move {
+                    let _permit = semaphore.acquire().await.ok()?;
+                    self.resolve_single(pkg).await
+                }
+            });
+
+            let results = join_all(futures).await;
+
+            for result in results.into_iter().flatten() {
+                let key = format!("{}@{}", result.info.name, result.info.version);
+                if all_packages.insert(key.clone()) {
+                    if let Some(deps) = &result.info.dependencies {
+                        for (dep_name, dep_version) in deps {
+                            let dep_key = format!("{dep_name}@{dep_version}");
+                            if !all_packages.contains(&dep_key) {
+                                to_resolve.push(RequestPackage {
+                                    name: dep_name.clone(),
+                                    version: Some(dep_version.clone()),
+                                });
+                            }
                         }
                     }
                 }
             }
         }
 
-        let remaining: Vec<String> = indegree
-            .iter()
-            .filter_map(|(&pkg, &deg)| if deg > 0 { Some(pkg.clone()) } else { None })
+        let resolve_futures: Vec<_> = all_packages
+            .into_iter()
+            .map(|pkg_key| {
+                let parts: Vec<&str> = pkg_key.splitn(2, '@').collect();
+                if parts.len() == 2 {
+                    let req_pkg = RequestPackage {
+                        name: parts[0].to_string(),
+                        version: Some(parts[1].to_string()),
+                    };
+                    let semaphore = self.semaphore.clone();
+                    async move {
+                        let _permit = semaphore.acquire().await.ok()?;
+                        self.resolve_single(req_pkg).await
+                    }
+                    .boxed()
+                } else {
+                    ready(None).boxed()
+                }
+            })
             .collect();
 
-        if !remaining.is_empty() {
-            warn(
-                format!(
-                    "Circular dependencies detected: {remaining:?} - will be resolved at runtime"
-                ),
-                false,
-            );
-            result.extend(remaining);
+        let final_results = join_all(resolve_futures).await;
+
+        let mut graph = HashMap::new();
+        for node in final_results.into_iter().flatten() {
+            let key = format!("{}@{}", node.info.name, node.info.version);
+            graph.insert(key, node);
         }
 
-        result
+        graph
     }
 
-    pub fn detect_cycles(&self) -> Vec<Vec<String>> {
-        let mut cycles = Vec::new();
-        let mut visited = HashSet::new();
-        let mut rec_stack = HashSet::new();
+    async fn resolve_single(&self, package: RequestPackage) -> Option<DAGNode> {
+        let name = &package.name;
+        let version_req = package.version.as_deref().unwrap_or("latest");
 
-        for package in self.nodes.keys() {
-            if !visited.contains(package) {
-                let mut path = Vec::new();
-                if let Some(cycle) =
-                    self.dfs_cycle_detection(package, &mut visited, &mut rec_stack, &mut path)
-                {
-                    cycles.push(cycle);
-                }
-            }
+        let cache_key = format!("{name}@{version_req}");
+        {
+            let _cache = self.resolution_cache.read().await;
+            // if let Some(_) = cache.get(&cache_key) {}
         }
 
-        cycles
-    }
-
-    fn dfs_cycle_detection(
-        &self,
-        package: &String,
-        visited: &mut HashSet<String>,
-        rec_stack: &mut HashSet<String>,
-        path: &mut Vec<String>,
-    ) -> Option<Vec<String>> {
-        visited.insert(package.clone());
-        rec_stack.insert(package.clone());
-        path.push(package.clone());
-
-        if let Some(node) = self.nodes.get(package) {
-            for dep in &node.dependencies {
-                if !visited.contains(dep) {
-                    if let Some(cycle) = self.dfs_cycle_detection(dep, visited, rec_stack, path) {
-                        return Some(cycle);
-                    }
-                } else if rec_stack.contains(dep) {
-                    if let Some(cycle_start_pos) = path.iter().position(|p| p == dep) {
-                        let mut cycle = path[cycle_start_pos..].to_vec();
-                        cycle.push(dep.clone());
-                        return Some(cycle);
-                    } else {
-                        warn(
-                            format!(
-                                "Detected cycle edge case: {package} -> {dep} (dep in rec_stack but not in path)"
-                            ),
-                            false,
-                        );
-                        return Some(vec![package.clone(), dep.clone()]);
-                    }
-                }
-            }
+        let versions = self.get_cached_versions(name).await;
+        if versions.is_empty() {
+            return None;
         }
 
-        path.pop();
-        rec_stack.remove(package);
-        None
-    }
-}
+        let available: Vec<&str> = versions.iter().map(|(v, _)| v.as_str()).collect();
+        let selected_version = semver::select_version(version_req, available)?;
 
-pub struct DAGBuilder {
-    visited: Arc<Mutex<HashSet<String>>>,
-    graph: Arc<Mutex<DependencyGraph>>,
-    resolution_path: Arc<Mutex<Vec<String>>>,
-}
+        let pkg_version =
+            versions.into_iter().find(|(v, _)| v == &selected_version).map(|(_, data)| data)?;
 
-impl DAGBuilder {
-    pub fn new() -> Self {
-        Self {
-            visited: Arc::new(Mutex::new(HashSet::new())),
-            graph: Arc::new(Mutex::new(DependencyGraph::new())),
-            resolution_path: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    pub async fn build(&self, package: RequestPackage) -> Arc<Mutex<DependencyGraph>> {
-        self.resolve_package(package).await;
-
-        let graph = self.graph.lock().await;
-        let cycles = graph.detect_cycles();
-        if !cycles.is_empty() {
-            warn(
-                format!("Circular dependencies detected (will be handled at runtime): {cycles:?}"),
-                false,
-            );
-        }
-        drop(graph);
-
-        self.graph.clone()
-    }
-
-    #[async_recursion]
-    async fn resolve_package(&self, package: RequestPackage) -> Option<String> {
-        let name = package.name.clone();
-        let version_req = package.version.clone().unwrap_or_else(|| "latest".to_string());
-
-        let key = format!("{name}@{version_req}");
+        let final_key = format!("{name}@{selected_version}");
 
         {
-            let path = self.resolution_path.lock().await;
-            if path.contains(&key) {
-                warn(format!("Circular dependency detected during resolution: {key}"), false);
-                return Some(key);
-            }
+            let mut cache = self.resolution_cache.write().await;
+            cache.insert(cache_key, final_key.clone());
         }
 
+        let dep_keys = if let Some(deps) = &pkg_version.dependencies {
+            deps.iter().map(|(dep_name, dep_version)| format!("{dep_name}@{dep_version}")).collect()
+        } else {
+            Vec::new()
+        };
+
+        Some(DAGNode { package: final_key, dependencies: dep_keys, info: pkg_version })
+    }
+
+    async fn get_cached_versions(&self, name: &str) -> Vec<(String, PackageVersion)> {
         {
-            let visited = self.visited.lock().await;
-            if visited.contains(&key) {
-                return Some(key);
+            let cache = GLOBAL_PACKAGE_CACHE.read().await;
+            if let Some(versions) = cache.get(name) {
+                return versions.clone();
             }
         }
 
-        {
-            let mut path = self.resolution_path.lock().await;
-            path.push(key.clone());
+        let req_pkg = RequestPackage { name: name.to_string(), version: None };
+        let versions = req_pkg.get_package_versions().await;
+
+        if !versions.is_empty() {
+            let mut cache = GLOBAL_PACKAGE_CACHE.write().await;
+            cache.insert(name.to_string(), versions.clone());
         }
 
-        let result = async {
-            let versions = package.get_package_versions().await;
-            if versions.is_empty() {
-                error(format!("No versions found for {name}"), false);
-                return None;
-            }
-
-            let available: Vec<&str> = versions.iter().map(|(v, _)| v.as_str()).collect();
-            let selected_version = semver::select_version(&version_req, available)?;
-
-            let pkg_version = match versions.into_iter().find(|(v, _)| v == &selected_version) {
-                Some((_, version_data)) => version_data,
-                None => {
-                    let err_msg = format!("Selected version {selected_version} for {name} not found in available versions");
-                    error(err_msg, false);
-
-                    return None;
-                }
-            };
-
-            let mut dep_keys = Vec::new();
-
-            if let Some(deps) = pkg_version.dependencies.clone() {
-                for (dep_name, dep_range) in deps {
-                    let dep_pkg =
-                        RequestPackage { name: dep_name.clone(), version: Some(dep_range.clone()) };
-                    if let Some(dep_key) = self.resolve_package(dep_pkg).await {
-                        dep_keys.push(dep_key);
-                    } else {
-                        warn(format!("Could not resolve dependency: {dep_name}"), false);
-                    }
-                }
-            }
-
-            let final_key = format!("{name}@{selected_version}");
-            let node = DAGNode { package: final_key.clone(), dependencies: dep_keys, info: pkg_version, };
-
-            {
-                let mut graph = self.graph.lock().await;
-                graph.add_node(node);
-            }
-
-            {
-                let mut visited = self.visited.lock().await;
-                visited.insert(key.clone());
-                visited.insert(final_key.clone());
-            }
-
-            Some(final_key)
-        }
-        .await;
-
-        {
-            let mut path = self.resolution_path.lock().await;
-            if let Some(pos) = path.iter().rposition(|p| p == &key) {
-                path.remove(pos);
-            }
-        }
-
-        result
+        versions
     }
 }
 

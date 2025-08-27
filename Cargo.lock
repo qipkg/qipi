@@ -1244,6 +1244,8 @@ version = "0.1.0"
 dependencies = [
  "async-recursion",
  "client",
+ "futures",
+ "once_cell",
  "tokio",
  "utils",
 ]
