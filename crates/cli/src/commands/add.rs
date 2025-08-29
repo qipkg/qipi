@@ -70,6 +70,11 @@ impl Command for AddCommand {
             sub_info(format!("📦 {package}: {} dependencies", nodes.len()), false);
         }
 
+        let installed = store.add_packages(all_packages).await;
+        if !installed.is_empty() {
+            success(format!("Installed {} packages", installed.len()), false);
+        }
+
         let duration = start.elapsed();
         success(format!("Finished in: {duration:.2?}"), false);
 

@@ -123,16 +123,15 @@ impl DAGBuilder {
 
             for result in results.into_iter().flatten() {
                 let key = format!("{}@{}", result.info.name, result.info.version);
-                if all_packages.insert(key.clone()) {
-                    if let Some(deps) = &result.info.dependencies {
-                        for (dep_name, dep_version) in deps {
-                            let dep_key = format!("{dep_name}@{dep_version}");
-                            if !all_packages.contains(&dep_key) {
-                                to_resolve.push(RequestPackage {
-                                    name: dep_name.clone(),
-                                    version: Some(dep_version.clone()),
-                                });
-                            }
+                if all_packages.insert(key) {
+                    for dep in &result.dependencies {
+                        if let Some(pos) = dep.rfind('@') {
+                            let (dep_name, dep_ver_with_at) = dep.split_at(pos);
+                            let dep_version = &dep_ver_with_at[1..];
+                            to_resolve.push(RequestPackage {
+                                name: dep_name.to_string(),
+                                version: Some(dep_version.to_string()),
+                            });
                         }
                     }
                 }
@@ -142,11 +141,13 @@ impl DAGBuilder {
         let resolve_futures: Vec<_> = all_packages
             .into_iter()
             .map(|pkg_key| {
-                let parts: Vec<&str> = pkg_key.splitn(2, '@').collect();
-                if parts.len() == 2 {
+                if let Some(pos) = pkg_key.rfind('@') {
+                    let (name, ver_with_at) = pkg_key.split_at(pos);
+                    let version = &ver_with_at[1..];
+
                     let req_pkg = RequestPackage {
-                        name: parts[0].to_string(),
-                        version: Some(parts[1].to_string()),
+                        name: name.to_string(),
+                        version: Some(version.to_string()),
                     };
                     let semaphore = self.semaphore.clone();
                     async move {
@@ -199,11 +200,25 @@ impl DAGBuilder {
             cache.insert(cache_key, final_key.clone());
         }
 
-        let dep_keys = if let Some(deps) = &pkg_version.dependencies {
-            deps.iter().map(|(dep_name, dep_version)| format!("{dep_name}@{dep_version}")).collect()
-        } else {
-            Vec::new()
-        };
+        let mut dep_keys: Vec<String> = Vec::new();
+
+        if let Some(deps) = &pkg_version.dependencies {
+            for (dep_name, dep_version) in deps {
+                dep_keys.push(format!("{dep_name}@{dep_version}"));
+            }
+        }
+
+        if let Some(opt_deps) = &pkg_version.optional_dependencies {
+            for (dep_name, dep_version) in opt_deps {
+                dep_keys.push(format!("{dep_name}@{dep_version}"));
+            }
+        }
+
+        if let Some(peer_deps) = &pkg_version.peer_dependencies {
+            for (dep_name, dep_version) in peer_deps {
+                dep_keys.push(format!("{dep_name}@{dep_version}"));
+            }
+        }
 
         Some(DAGNode { package: final_key, dependencies: dep_keys, info: pkg_version })
     }

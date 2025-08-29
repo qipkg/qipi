@@ -22,14 +22,15 @@ pub enum EnginesField {
     Str(String),
     Bool(bool),
     Seq(Vec<serde_json::Value>),
-    None,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RegistryPackage {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub versions: HashMap<String, PackageVersion>,
-    #[serde(rename = "dist-tags")]
+    #[serde(rename = "dist-tags", default)]
     pub dist_tags: HashMap<String, String>,
 }
 
