@@ -94,7 +94,17 @@ impl AddCommand {
             entries
                 .filter_map(|entry| entry.ok())
                 .filter(|entry| entry.path().is_dir())
-                .map(|entry| entry.file_name().to_string_lossy().to_string())
+                .map(|entry| {
+                    let fname = entry.file_name().to_string_lossy().to_string();
+                    if let Some(pos) = fname.rfind('@') {
+                        let (name_part, version_part) = fname.split_at(pos);
+                        let version = &version_part[1..];
+                        let desanitized = name_part.replace('+', "/");
+                        format!("{desanitized}@{version}")
+                    } else {
+                        fname
+                    }
+                })
                 .collect()
         })
         .await

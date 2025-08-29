@@ -24,6 +24,14 @@ pub struct Store {
     pub extract_semaphore: Arc<Semaphore>,
 }
 
+fn sanitize_package_key(key: &str) -> String {
+    key.replace('/', "+")
+}
+
+fn unsanitize_name(s: &str) -> String {
+    s.replace('+', "/")
+}
+
 impl Store {
     pub fn new() -> Self {
         let home_dir = dirs::home_dir().unwrap();
@@ -113,7 +121,8 @@ impl Store {
             .into_iter()
             .filter(|pkg| {
                 let package_key = format!("{}@{}", pkg.name, pkg.version);
-                !self.store_path.join(&package_key).exists()
+                let sanitized = sanitize_package_key(&package_key);
+                !self.store_path.join(&sanitized).exists()
             })
             .collect();
 
@@ -128,7 +137,8 @@ impl Store {
 
     async fn download_extract(&self, package: PackageVersion) -> Option<String> {
         let package_key = format!("{}@{}", package.name, package.version);
-        let package_path = self.store_path.join(&package_key);
+        let sanitized_key = sanitize_package_key(&package_key);
+        let package_path = self.store_path.join(&sanitized_key);
 
         if create_dir_all(&package_path).is_err() {
             return None;
@@ -143,7 +153,7 @@ impl Store {
                 match extract_result {
                     Ok(_) => Some(package_key),
                     Err(_) => {
-                        let _ = remove_dir_all(self.store_path.join(&package_key));
+                        let _ = remove_dir_all(self.store_path.join(&sanitized_key));
                         None
                     }
                 }
@@ -164,7 +174,9 @@ impl Store {
     }
 
     pub fn remove(&self, name: String, version: String) {
-        let package_path = self.store_path.join(format!("{name}@{version}"));
+        let package_key = format!("{name}@{version}");
+        let sanitized = sanitize_package_key(&package_key);
+        let package_path = self.store_path.join(&sanitized);
         if package_path.exists() {
             let _ = remove_dir_all(&package_path);
             return;
@@ -213,8 +225,10 @@ impl Store {
             .filter_map(|entry| {
                 let file_name = entry.file_name().to_string_lossy().to_string();
                 if let Some(pos) = file_name.rfind('@') {
-                    let (name, version) = file_name.split_at(pos);
-                    let version = &version[1..];
+                    let (name_part, version_part) = file_name.split_at(pos);
+                    let version = &version_part[1..];
+
+                    let name = unsanitize_name(name_part);
 
                     let timestamp = metadata(entry.path())
                         .ok()
