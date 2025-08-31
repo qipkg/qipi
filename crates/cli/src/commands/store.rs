@@ -13,7 +13,7 @@ use std::fs::read_dir;
 #[clap(group(
     ArgGroup::new("action")
         .required(true)
-        .args(&["remove", "clear", "list"])
+        .args(&["remove", "clear", "list", "path"])
 ))]
 pub(crate) struct StoreCommand {
     #[clap(short, long, num_args = 1.., value_name = "PACKAGE")]
@@ -24,6 +24,9 @@ pub(crate) struct StoreCommand {
 
     #[clap(short, long)]
     list: bool,
+
+    #[clap(short, long)]
+    path: bool,
 }
 
 #[async_trait]
@@ -32,6 +35,10 @@ impl Command for StoreCommand {
         let store = Store::new();
         let mut term = Term::default();
         let mut theme = MinimalTheme::default();
+
+        if self.path {
+            println!("{}", store.store_path.to_string_lossy());
+        }
 
         if self.list {
             let packages = store.list();
