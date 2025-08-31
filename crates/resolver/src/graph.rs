@@ -3,7 +3,8 @@ use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::{FutureExt, join_all, ready};
+use futures::stream::FuturesUnordered;
+use futures_util::StreamExt;
 use tokio::sync::{RwLock, Semaphore};
 
 use crate::semver;
@@ -93,83 +94,77 @@ impl DAGBuilder {
         }
     }
 
-    pub async fn build(&self, package: RequestPackage) -> Arc<RwLock<DependencyGraph>> {
-        let nodes = self.internal_build(package).await;
+    pub async fn build_missing_only(&self, packages: Vec<RequestPackage>) -> Vec<PackageVersion> {
+        let mut all_resolved = Vec::new();
+        let mut processed = HashSet::new();
+        let mut to_process = packages;
 
-        let mut graph = DependencyGraph::with_capacity(nodes.len());
-        for (_, node) in nodes {
-            graph.add_node(node);
-        }
+        while !to_process.is_empty() {
+            let current_batch = std::mem::take(&mut to_process);
 
-        Arc::new(RwLock::new(graph))
-    }
-
-    async fn internal_build(&self, package: RequestPackage) -> HashMap<String, DAGNode> {
-        let mut all_packages = HashSet::new();
-        let mut to_resolve = vec![package];
-
-        while !to_resolve.is_empty() {
-            let current_batch = std::mem::take(&mut to_resolve);
-
-            let futures = current_batch.into_iter().map(|pkg| {
+            let mut futs = FuturesUnordered::new();
+            for pkg in current_batch {
                 let semaphore = self.semaphore.clone();
-                async move {
+                let b = self;
+                futs.push(async move {
                     let _permit = semaphore.acquire().await.ok()?;
-                    self.resolve_single(pkg).await
-                }
-            });
+                    b.resolve_single(pkg).await
+                });
+            }
 
-            let results = join_all(futures).await;
-
-            for result in results.into_iter().flatten() {
-                let key = format!("{}@{}", result.info.name, result.info.version);
-                if all_packages.insert(key) {
-                    for dep in &result.dependencies {
-                        if let Some(pos) = dep.rfind('@') {
-                            let (dep_name, dep_ver_with_at) = dep.split_at(pos);
-                            let dep_version = &dep_ver_with_at[1..];
-                            to_resolve.push(RequestPackage {
-                                name: dep_name.to_string(),
-                                version: Some(dep_version.to_string()),
-                            });
+            while let Some(res_opt) = futs.next().await {
+                if let Some(result) = res_opt {
+                    let key = format!("{}@{}", result.info.name, result.info.version);
+                    if processed.insert(key.clone()) {
+                        for dep in &result.dependencies {
+                            if let Some(pos) = dep.rfind('@') {
+                                let dep_name = dep[..pos].to_string();
+                                let dep_version = dep[pos + 1..].to_string();
+                                let dep_key = format!("{dep_name}@{dep_version}");
+                                if !processed.contains(&dep_key) {
+                                    to_process.push(RequestPackage {
+                                        name: dep_name,
+                                        version: Some(dep_version),
+                                    });
+                                }
+                            }
                         }
+                        all_resolved.push(result.info);
                     }
                 }
             }
         }
 
-        let resolve_futures: Vec<_> = all_packages
-            .into_iter()
-            .map(|pkg_key| {
-                if let Some(pos) = pkg_key.rfind('@') {
-                    let (name, ver_with_at) = pkg_key.split_at(pos);
-                    let version = &ver_with_at[1..];
+        all_resolved
+    }
 
-                    let req_pkg = RequestPackage {
-                        name: name.to_string(),
-                        version: Some(version.to_string()),
-                    };
-                    let semaphore = self.semaphore.clone();
-                    async move {
-                        let _permit = semaphore.acquire().await.ok()?;
-                        self.resolve_single(req_pkg).await
-                    }
-                    .boxed()
-                } else {
-                    ready(None).boxed()
+    pub async fn build(&self, package: RequestPackage) -> Arc<RwLock<DependencyGraph>> {
+        let packages = self.build_missing_only(vec![package]).await;
+        let mut graph = DependencyGraph::with_capacity(packages.len());
+
+        for package_version in packages {
+            let package_key = format!("{}@{}", package_version.name, package_version.version);
+            let mut dep_keys = Vec::new();
+            if let Some(deps) = &package_version.dependencies {
+                for (dep_name, dep_version) in deps {
+                    dep_keys.push(format!("{dep_name}@{dep_version}"));
                 }
-            })
-            .collect();
-
-        let final_results = join_all(resolve_futures).await;
-
-        let mut graph = HashMap::new();
-        for node in final_results.into_iter().flatten() {
-            let key = format!("{}@{}", node.info.name, node.info.version);
-            graph.insert(key, node);
+            }
+            if let Some(opt_deps) = &package_version.optional_dependencies {
+                for (dep_name, dep_version) in opt_deps {
+                    dep_keys.push(format!("{dep_name}@{dep_version}"));
+                }
+            }
+            if let Some(peer_deps) = &package_version.peer_dependencies {
+                for (dep_name, dep_version) in peer_deps {
+                    dep_keys.push(format!("{dep_name}@{dep_version}"));
+                }
+            }
+            let node =
+                DAGNode { package: package_key, dependencies: dep_keys, info: package_version };
+            graph.add_node(node);
         }
-
-        graph
+        Arc::new(RwLock::new(graph))
     }
 
     async fn resolve_single(&self, package: RequestPackage) -> Option<DAGNode> {
@@ -178,8 +173,38 @@ impl DAGBuilder {
 
         let cache_key = format!("{name}@{version_req}");
         {
-            let _cache = self.resolution_cache.read().await;
-            // if let Some(_) = cache.get(&cache_key) {}
+            let cache = self.resolution_cache.read().await;
+            if let Some(final_key) = cache.get(&cache_key).cloned() {
+                drop(cache);
+                if let Some(pos) = final_key.rfind('@') {
+                    let pkg_name = &final_key[..pos];
+                    let pkg_version = &final_key[pos + 1..];
+                    let versions = self.get_cached_versions(pkg_name).await;
+                    if let Some((_, data)) = versions.into_iter().find(|(v, _)| v == pkg_version) {
+                        let mut dep_keys: Vec<String> = Vec::new();
+                        if let Some(deps) = &data.dependencies {
+                            for (dep_name, dep_version) in deps {
+                                dep_keys.push(format!("{dep_name}@{dep_version}"));
+                            }
+                        }
+                        if let Some(opt_deps) = &data.optional_dependencies {
+                            for (dep_name, dep_version) in opt_deps {
+                                dep_keys.push(format!("{dep_name}@{dep_version}"));
+                            }
+                        }
+                        if let Some(peer_deps) = &data.peer_dependencies {
+                            for (dep_name, dep_version) in peer_deps {
+                                dep_keys.push(format!("{dep_name}@{dep_version}"));
+                            }
+                        }
+                        return Some(DAGNode {
+                            package: final_key.clone(),
+                            dependencies: dep_keys,
+                            info: data,
+                        });
+                    }
+                }
+            }
         }
 
         let versions = self.get_cached_versions(name).await;

@@ -1,28 +1,45 @@
 use client::registry::PackageVersion;
+use client::versions::RequestPackage;
 use flate2::read::GzDecoder;
 use reqwest::Client;
 use tar::Archive;
 
-use futures::future::join_all;
+use futures::stream::FuturesUnordered;
 use futures_util::StreamExt;
-use tokio::{fs::File as TokioFile, io::AsyncWriteExt, sync::Semaphore, task::spawn_blocking};
+use tokio::{
+    fs::File as TokioFile,
+    io::AsyncWriteExt,
+    runtime::Runtime,
+    spawn,
+    sync::{RwLock, Semaphore},
+    task::spawn_blocking,
+};
 
 use std::{
+    collections::HashSet,
     error::Error,
-    fs::{File, create_dir_all, metadata, read_dir, remove_dir_all, remove_file, rename},
+    fs::{
+        File, create_dir_all, metadata, read_dir, read_to_string, remove_dir_all, remove_file,
+        rename, write,
+    },
     io::BufReader,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, UNIX_EPOCH},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 use utils::logger::*;
+
+type PackageCache = Arc<RwLock<Option<(HashSet<String>, Instant)>>>;
 
 pub struct Store {
     pub store_path: PathBuf,
     pub client: Arc<Client>,
     pub download_semaphore: Arc<Semaphore>,
     pub extract_semaphore: Arc<Semaphore>,
+    package_cache: PackageCache,
 }
+
+const STORE_CACHE_TTL: Duration = Duration::from_secs(60);
 
 fn sanitize_package_key(key: &str) -> String {
     key.replace('/', "+")
@@ -33,6 +50,46 @@ fn unsanitize_name(s: &str) -> String {
 }
 
 impl Store {
+    fn load_index_sync(store_path: &Path) -> Option<HashSet<String>> {
+        let index_path = store_path.join(".index");
+        if !index_path.exists() {
+            return None;
+        }
+
+        match read_to_string(index_path) {
+            Ok(content) => {
+                let set = content
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                Some(set)
+            }
+            Err(_) => None,
+        }
+    }
+
+    fn scan_store_packages_sync(store_path: &Path) -> HashSet<String> {
+        let Ok(entries) = read_dir(store_path) else {
+            return HashSet::new();
+        };
+        entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if let Some(pos) = fname.rfind('@') {
+                    let (name_part, version_part) = fname.split_at(pos);
+                    let version = &version_part[1..];
+                    let desanitized = name_part.replace('+', "/");
+                    format!("{desanitized}@{version}")
+                } else {
+                    fname
+                }
+            })
+            .collect()
+    }
+
     pub fn new() -> Self {
         let home_dir = dirs::home_dir().unwrap();
         let store_path = home_dir.join(".qipi").join("store");
@@ -42,12 +99,96 @@ impl Store {
             info("Store directory created", false);
         }
 
+        let initial_cache = match Self::load_index_sync(&store_path) {
+            Some(pkgs) => Some((pkgs, Instant::now())),
+            None => {
+                let pkgs = Self::scan_store_packages_sync(&store_path);
+                if !pkgs.is_empty() {
+                    let index_path = store_path.join(".index");
+                    let data = pkgs.iter().cloned().collect::<Vec<_>>().join("\n");
+                    let tmp = index_path.with_extension("tmp");
+                    let _ = write(&tmp, data.as_bytes());
+                    let _ = rename(tmp, index_path);
+                }
+                Some((pkgs, Instant::now()))
+            }
+        };
+
         Self {
             store_path,
             client: Arc::new(Self::create_client()),
             download_semaphore: Arc::new(Semaphore::new(50)),
             extract_semaphore: Arc::new(Semaphore::new(20)),
+            package_cache: Arc::new(RwLock::new(initial_cache)),
         }
+    }
+
+    async fn get_cached_packages(&self) -> HashSet<String> {
+        {
+            let cache = self.package_cache.read().await;
+            if let Some((packages, timestamp)) = cache.as_ref() {
+                if timestamp.elapsed() < STORE_CACHE_TTL {
+                    return packages.clone();
+                }
+            }
+        }
+
+        let packages = spawn_blocking({
+            let store_path = self.store_path.clone();
+            move || Self::scan_store_packages_sync(&store_path)
+        })
+        .await
+        .unwrap_or_default();
+
+        {
+            let mut cache = self.package_cache.write().await;
+            *cache = Some((packages.clone(), Instant::now()));
+        }
+
+        let index_path = self.store_path.join(".index");
+        let data = packages.iter().cloned().collect::<Vec<_>>().join("\n");
+        let index_path_clone = index_path.clone();
+        spawn_blocking(move || {
+            let tmp = index_path_clone.with_extension("tmp");
+            let _ = write(&tmp, data.as_bytes());
+            let _ = rename(tmp, index_path_clone);
+        })
+        .await
+        .ok();
+
+        packages
+    }
+
+    pub async fn filter_missing_packages(
+        &self,
+        requested: &[RequestPackage],
+    ) -> (Vec<RequestPackage>, usize) {
+        let existing_packages = self.get_cached_packages().await;
+        let mut missing = Vec::new();
+        let mut existing_count = 0;
+
+        for pkg in requested {
+            let package_key = if let Some(version) = &pkg.version {
+                format!("{}@{version}", pkg.name)
+            } else {
+                let prefix = format!("{}@", pkg.name);
+                let found = existing_packages.iter().any(|k| k.starts_with(&prefix));
+                if found {
+                    existing_count += 1;
+                    continue;
+                } else {
+                    missing.push((*pkg).clone());
+                    continue;
+                }
+            };
+            if existing_packages.contains(&package_key) {
+                existing_count += 1;
+            } else {
+                missing.push((*pkg).clone());
+            }
+        }
+
+        (missing, existing_count)
     }
 
     fn create_client() -> Client {
@@ -62,13 +203,84 @@ impl Store {
             .unwrap_or_else(|_| Client::new())
     }
 
-    #[allow(dead_code)]
-    async fn download(
+    pub async fn install_packages(&self, packages: Vec<PackageVersion>) -> Vec<String> {
+        let existing_packages = self.get_cached_packages().await;
+        let packages_to_install: Vec<_> = packages
+            .into_iter()
+            .filter(|pkg| {
+                let package_key = format!("{}@{}", pkg.name, pkg.version);
+                !existing_packages.contains(&package_key)
+            })
+            .collect();
+
+        if packages_to_install.is_empty() {
+            return Vec::new();
+        }
+
+        info(format!("Installing {} new packages...", packages_to_install.len()), false);
+
+        let mut futs = FuturesUnordered::new();
+        for pkg in packages_to_install.into_iter() {
+            let download_sem = self.download_semaphore.clone();
+            let extract_sem = self.extract_semaphore.clone();
+            let s = self;
+            futs.push(async move {
+                let _download_permit = download_sem.acquire().await.ok()?;
+                let tarball_path = s.download_package(&pkg).await.ok()?;
+
+                drop(_download_permit);
+                let _extract_permit = extract_sem.acquire().await.ok()?;
+                s.extract_package(tarball_path, &pkg).await.ok()?;
+                Some(format!("{}@{}", pkg.name, pkg.version))
+            });
+        }
+
+        let mut installed: Vec<String> = Vec::new();
+        while let Some(result) = futs.next().await {
+            if let Some(k) = result {
+                installed.push(k);
+            }
+        }
+
+        if !installed.is_empty() {
+            let mut cache = self.package_cache.write().await;
+            let mut set =
+                if let Some((s, _)) = cache.as_ref() { s.clone() } else { HashSet::new() };
+            for k in &installed {
+                set.insert(k.clone());
+            }
+            *cache = Some((set.clone(), Instant::now()));
+
+            let index_path = self.store_path.join(".index");
+            let data = set.into_iter().collect::<Vec<_>>().join("\n");
+            let index_path_clone = index_path.clone();
+
+            spawn_blocking(move || {
+                let tmp = index_path_clone.with_extension("tmp");
+                let _ = write(&tmp, data.as_bytes());
+                let _ = rename(tmp, index_path_clone);
+            })
+            .await
+            .ok();
+        }
+
+        installed
+    }
+
+    async fn download_package(
         &self,
-        url: &str,
-        package_path: &Path,
+        package: &PackageVersion,
     ) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
-        let response = self.client.get(url).send().await?;
+        let package_key = format!("{}@{}", package.name, package.version);
+        let sanitized_key = sanitize_package_key(&package_key);
+        let package_path = self.store_path.join(&sanitized_key);
+
+        create_dir_all(&package_path)?;
+
+        let response = self.client.get(&package.dist.tarball).send().await?;
+        if !response.status().is_success() {
+            return Err("Failed to download tarball".into());
+        }
 
         let tarball_path = package_path.join("package.tgz");
         let mut file = TokioFile::create(&tarball_path).await?;
@@ -83,12 +295,15 @@ impl Store {
         Ok(tarball_path)
     }
 
-    #[allow(dead_code)]
-    async fn extract(
+    async fn extract_package(
         &self,
         tarball_path: PathBuf,
-        package_path: PathBuf,
+        package: &PackageVersion,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let package_key = format!("{}@{}", package.name, package.version);
+        let sanitized_key = sanitize_package_key(&package_key);
+        let package_path = self.store_path.join(&sanitized_key);
+
         spawn_blocking(move || -> Result<(), Box<dyn Error + Send + Sync>> {
             let file = File::open(&tarball_path)?;
             let decoder = GzDecoder::new(BufReader::new(file));
@@ -116,55 +331,6 @@ impl Store {
         .await?
     }
 
-    pub async fn install_packages(&self, packages: Vec<PackageVersion>) -> Vec<String> {
-        let packages_to_install: Vec<_> = packages
-            .into_iter()
-            .filter(|pkg| {
-                let package_key = format!("{}@{}", pkg.name, pkg.version);
-                let sanitized = sanitize_package_key(&package_key);
-                !self.store_path.join(&sanitized).exists()
-            })
-            .collect();
-
-        if packages_to_install.is_empty() {
-            return Vec::new();
-        }
-
-        let futures = packages_to_install.into_iter().map(|pkg| self.download_extract(pkg));
-        let results = join_all(futures).await;
-        results.into_iter().flatten().collect()
-    }
-
-    async fn download_extract(&self, package: PackageVersion) -> Option<String> {
-        let package_key = format!("{}@{}", package.name, package.version);
-        let sanitized_key = sanitize_package_key(&package_key);
-        let package_path = self.store_path.join(&sanitized_key);
-
-        if create_dir_all(&package_path).is_err() {
-            return None;
-        }
-
-        let download_result = self.download(&package.dist.tarball, &package_path).await;
-
-        match download_result {
-            Ok(tarball_path) => {
-                let extract_result = self.extract(tarball_path, package_path).await;
-
-                match extract_result {
-                    Ok(_) => Some(package_key),
-                    Err(_) => {
-                        let _ = remove_dir_all(self.store_path.join(&sanitized_key));
-                        None
-                    }
-                }
-            }
-            Err(_) => {
-                let _ = remove_dir_all(&package_path);
-                None
-            }
-        }
-    }
-
     pub async fn add_packages(&self, packages: Vec<PackageVersion>) -> Vec<String> {
         self.install_packages(packages).await
     }
@@ -179,6 +345,13 @@ impl Store {
         let package_path = self.store_path.join(&sanitized);
         if package_path.exists() {
             let _ = remove_dir_all(&package_path);
+            let cache = self.package_cache.clone();
+            spawn(async move {
+                let mut cache = cache.write().await;
+                if let Some((set, _)) = cache.as_mut() {
+                    set.remove(&package_key);
+                }
+            });
             return;
         }
 
@@ -210,6 +383,22 @@ impl Store {
                 info(format!("Removed {}", path.display()), false);
             }
         }
+
+        let index_path = self.store_path.join(".index");
+        if index_path.exists() {
+            let _ = remove_file(&index_path);
+        }
+
+        let cache = self.package_cache.clone();
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async move {
+                let mut cache = cache.write().await;
+                *cache = Some((HashSet::new(), Instant::now()));
+            });
+        })
+        .join()
+        .unwrap();
 
         success("Store cleared", false);
     }

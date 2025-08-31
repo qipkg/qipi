@@ -1246,6 +1246,7 @@ dependencies = [
  "async-recursion",
  "client",
  "futures",
+ "futures-util",
  "once_cell",
  "tokio",
  "utils",

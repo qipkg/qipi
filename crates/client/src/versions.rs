@@ -26,6 +26,7 @@ impl CacheEntry {
 static PACKAGE_CACHE: Lazy<Arc<RwLock<HashMap<String, CacheEntry>>>> =
     Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
 
+#[derive(Clone, Debug)]
 pub struct RequestPackage {
     pub name: String,
     pub version: Option<String>,
